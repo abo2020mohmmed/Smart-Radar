@@ -1,0 +1,24 @@
+name: Smart Radar Auto Run
+
+on:
+  workflow_dispatch: # يتيح لك تشغيل الكود يدوياً متى أردت
+  schedule:
+    - cron: '0 9 * * *' # سيعمل تلقائياً كل يوم الساعة 9 صباحاً
+
+jobs:
+  run-radar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Execute Radar
+        run: python radar_script.py
