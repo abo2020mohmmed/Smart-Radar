@@ -58,6 +58,11 @@ jobs:
           Copy-Item third-party -Destination artifacts/win-x64 -Recurse
           Compress-Archive -Path artifacts/win-x64/* -DestinationPath artifacts/WinImageStudio-windows-x64.zip
           Get-FileHash artifacts/WinImageStudio-windows-x64.zip -Algorithm SHA256 | Format-List
+      - name: Verify desktop startup and path navigation
+        shell: powershell
+        run: |
+          & ./tests/Desktop.Smoke.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Downloadable Windows package
         uses: actions/upload-artifact@v4
         with:

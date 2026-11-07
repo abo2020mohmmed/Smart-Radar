@@ -17,6 +17,9 @@ public sealed record PlannedOperation(OperationKind Kind, string Target, string 
 }
 public sealed class ProjectSession
 {
+    public int WorkflowStage { get; set; }
+    public string WorkflowMode { get; set; } = "Strong";
+    public string? OutputIso { get; set; }
     public int SchemaVersion { get; set; } = 1;
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public required string Root { get; set; }

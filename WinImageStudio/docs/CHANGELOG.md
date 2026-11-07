@@ -1,5 +1,13 @@
 # Changes
 
+## 0.3.0
+
+- Added five numbered steps and separate strong/manual paths, contextual next-step guidance and completion indicators persisted per project.
+- Preparation exports the selected edition and mounts it in one action. Apply, commit and ISO creation remain explicit operations; unreviewed plans cannot be committed through the guided interface.
+- Reworked dark controls, including combo-box dropdowns and readable status panels.
+- Fixed OneDrive removal failing before its error handler on WIM/WOF storage-backed reparse files. Only known storage tags on the two exact offline installer paths are accepted, opened without following leaf links and deleted through the validated handle. Parent links, symbolic links, directory and unknown tags remain refused. Protected/refused installers are reported and do not abort unrelated preset steps.
+- Added Windows regression tests for readonly files, leaf/parent links, a compacted WOF file and capture/mount/commit/remount of a tiny fixture WIM, plus a WPF startup/navigation smoke check. These fixtures do not certify a complete customized Windows installation.
+
 ## 0.2.0
 
 - Added a Pro-only aggressive preset with typed, reviewable operations and explanations; revalidate its canonical operations against fresh mounted-image inventory immediately before execution.

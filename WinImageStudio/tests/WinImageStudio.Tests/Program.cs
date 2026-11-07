@@ -18,6 +18,7 @@ void Equal<T>(T expected, T actual) { if (!EqualityComparer<T>.Default.Equals(ex
 void Throws<T>(Action action) where T : Exception { try { action(); } catch (T) { return; } throw new Exception("Expected " + typeof(T).Name); }
 try
 {
+    foreach (var test in OfflineSetupTests.Cases()) await Test(test.Name, () => Sync(test.Body));
     await Test("DISM export keeps paths with spaces in single arguments", () => Sync(() =>
     {
         var args = DismCommands.Export("C:\\Windows media\\install.esd", 3, "D:\\Work images\\install.wim");

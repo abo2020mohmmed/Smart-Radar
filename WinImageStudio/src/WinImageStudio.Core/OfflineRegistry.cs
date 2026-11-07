@@ -102,17 +102,13 @@ public sealed class OfflineRegistry(ICommandRunner runner, string regTool)
         foreach (string subdirectory in new[] { "System32", "SysWOW64" })
         {
             token.ThrowIfCancellationRequested();
-            string file = Validation.UnderRoot(project.MountPath, Path.Combine(project.MountPath, "Windows", subdirectory, "OneDriveSetup.exe"));
-            if (!File.Exists(file)) continue;
             try
             {
-                Validation.RejectReparse(file);
-                File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly);
-                File.Delete(file);
+                OfflineSetupFile.DeleteOneDrive(project.MountPath, subdirectory);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                notes.Add("OneDrive: لم يُحذف ملف محمي/مقفل: " + file + " | " + ex.Message);
+                notes.Add("OneDrive: بقي ملف إعداد محمي أو رابط؛ تم تجاوزه: Windows/" + subdirectory + "/OneDriveSetup.exe | " + ex.Message);
             }
         }
         foreach (string folder in new[] { "Program Files", "Program Files (x86)" })

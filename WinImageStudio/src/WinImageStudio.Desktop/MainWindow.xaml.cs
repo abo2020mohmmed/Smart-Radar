@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     private ProjectSession? project;
     private CancellationTokenSource? cancellation;
     private bool busy;
+    private bool initialized;
     private AggressiveReport? strongReport;
     private string? strongProjectId;
     private readonly object logLock = new();
@@ -34,6 +35,9 @@ public partial class MainWindow : Window
         RegistryTypeBox.ItemsSource = Enum.GetValues<ValueKind>(); RegistryTypeBox.SelectedIndex = 0;
         PlanGrid.ItemsSource = plan;
         engine = NewEngine();
+        initialized = true;
+        plan.CollectionChanged += (_, _) => { if (project is not null) { project.WorkflowStage = Math.Min(project.WorkflowStage, 2); project.OutputIso = null; } RefreshJourney(); };
+        RefreshJourney();
     }
     private ImageEngine NewEngine()
     {
@@ -46,7 +50,7 @@ public partial class MainWindow : Window
     private async Task RunAsync(string title, Func<CancellationToken, Task> action)
     {
         if (busy) return;
-        busy = true; EditorTabs.IsEnabled = false; CancelButton.IsEnabled = true; Progress.IsIndeterminate = true;
+        busy = true; RefreshJourney(); EditorTabs.IsEnabled = false; CancelButton.IsEnabled = true; Progress.IsIndeterminate = true;
         cancellation = new CancellationTokenSource(); StatusLabel.Text = title; Log(title);
         try { await action(cancellation.Token); StatusLabel.Text = "اكتملت العملية"; }
         catch (OperationCanceledException) { StatusLabel.Text = "توقفت المهمة بين الخطوات؛ راجع حالة المشروع قبل المتابعة."; Log(StatusLabel.Text); }
@@ -58,7 +62,12 @@ public partial class MainWindow : Window
         finally
         {
             cancellation.Dispose(); cancellation = null; busy = false; EditorTabs.IsEnabled = true; CancelButton.IsEnabled = false; Progress.IsIndeterminate = false;
-            UpdateSessionLabel();
+            if (project is not null)
+            {
+                try { await store.SaveAsync(project); }
+                catch (Exception ex) { Log("تعذر حفظ تقدم الواجهة: " + ex.Message); StatusLabel.Text = "تعذر حفظ تقدم المشروع؛ راجع السجل."; }
+            }
+            UpdateSessionLabel(); RefreshJourney();
         }
     }
     private void UpdateSessionLabel() => SessionLabel.Text = project is null ? "لا يوجد مشروع مفتوح" : $"{project.Image?.ImageName ?? "المصدر"} | {project.State}\n{project.Root}\n{project.PendingOperation}";
@@ -89,7 +98,9 @@ public partial class MainWindow : Window
     {
         if (project?.State is ImageState.Mounted or ImageState.RecoveryRequired) throw new InvalidOperationException("ألغِ تركيب المشروع الحالي أو استعده قبل فتح مشروع آخر.");
         project = await engine.CreateAsync(SourceBox.Text, WorkspaceBox.Text, token);
-        plan.Clear(); ResetStrong(); ImagesBox.ItemsSource = await engine.InspectAsync(project, token); ImagesBox.SelectedIndex = 0;
+        plan.Clear(); ResetStrong(); project.WorkflowMode = StrongMode.IsChecked == true ? "Strong" : "Manual";
+        ImagesBox.ItemsSource = await engine.InspectAsync(project, token); SelectPro(); project.WorkflowStage = 1;
+        EditorTabs.SelectedItem = PrepareTab;
     });
     private async void OpenProject(object sender, RoutedEventArgs e)
     {
@@ -97,9 +108,11 @@ public partial class MainWindow : Window
         await RunAsync("فتح المشروع", async token =>
         {
             if (project?.State is ImageState.Mounted or ImageState.RecoveryRequired) throw new InvalidOperationException("ألغِ تركيب المشروع الحالي أو استعده أولًا.");
-            project = await store.LoadAsync(dialog.FolderName, token); plan.Clear(); ResetStrong();
+            plan.Clear(); project = await store.LoadAsync(dialog.FolderName, token); ResetStrong();
+            StrongMode.IsChecked = project.WorkflowMode != "Manual"; ManualMode.IsChecked = project.WorkflowMode == "Manual";
             ImagesBox.ItemsSource = project.Image is null ? await engine.InspectAsync(project, token) : new[] { project.Image };
-            ImagesBox.SelectedIndex = 0;
+            SelectPro();
+            if (project.WorkflowStage == 0) project.WorkflowStage = project.State == ImageState.Committed ? 4 : project.State == ImageState.Mounted ? 2 : 1;
         });
     }
     private async void ImportImage(object sender, RoutedEventArgs e) => await RunAsync("نسخ الإصدار المختار", async token =>
@@ -167,8 +180,9 @@ public partial class MainWindow : Window
     {
         if (AcknowledgeBox.IsChecked != true) throw new InvalidOperationException("راجع الخطة وحدد مربع الإقرار قبل تطبيقها.");
         var snapshot = plan.ToArray(); if (snapshot.Length == 0) throw new InvalidOperationException("الخطة فارغة.");
-        var completed = new Progress<PlannedOperation>(operation => plan.Remove(operation));
+        var completed = new SynchronousProgress(operation => Dispatcher.Invoke(() => plan.Remove(operation)));
         await engine.ApplyAsync(Session(), snapshot, token, completed); plan.Clear(); AcknowledgeBox.IsChecked = false;
+        Session().WorkflowStage = 3; ResetStrong();
         if (engine.OperationNotices.Count > 0)
         {
             StrongStatus.Text = "نتيجة التطبيق — راجع العناصر التي بقيت:" + Environment.NewLine + string.Join(Environment.NewLine, engine.OperationNotices);
@@ -176,21 +190,25 @@ public partial class MainWindow : Window
             MessageBox.Show(this, StrongStatus.Text, "تقرير التخفيف", MessageBoxButton.OK, MessageBoxImage.Information);
         }
     });
-    private async void CommitImage(object sender, RoutedEventArgs e) => await RunAsync("حفظ الصورة وإلغاء التركيب", token => engine.UnmountAsync(Session(), true, token));
+    private async void CommitImage(object sender, RoutedEventArgs e) => await RunAsync("حفظ الصورة وإلغاء التركيب", async token =>
+    {
+        if (plan.Count != 0 || Session().WorkflowStage < 3) throw new InvalidOperationException("طبّق الخطة أولًا، أو اختر المتابعة دون تعديلات بعد مراجعتها.");
+        await engine.UnmountAsync(Session(), true, token); Session().WorkflowStage = 4; EditorTabs.SelectedItem = OutputTab;
+    });
     private async void DiscardImage(object sender, RoutedEventArgs e)
     {
         if (MessageBox.Show(this, "تجاهل كل التعديلات غير المحفوظة في جلسة الصورة الحالية؟", "Discard", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        await RunAsync("تجاهل التعديلات", token => engine.UnmountAsync(Session(), false, token));
+        await RunAsync("تجاهل التعديلات", async token => { await engine.UnmountAsync(Session(), false, token); ResetAfterDiscard(); });
     }
     private async void RecoverImage(object sender, RoutedEventArgs e)
     {
         if (MessageBox.Show(this, "ستُستعاد جلسة هذا المشروع فقط وتُتجاهل تعديلات التركيب غير المحفوظة. المتابعة؟", "Recovery", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        await RunAsync("استعادة جلسة المشروع", token => engine.RecoverDiscardAsync(Session(), token));
+        await RunAsync("استعادة جلسة المشروع", async token => { await engine.RecoverDiscardAsync(Session(), token); ResetAfterDiscard(); });
     }
     private async void BuildIso(object sender, RoutedEventArgs e)
     {
         var dialog = new SaveFileDialog { Filter = "ISO image|*.iso", FileName = "Windows-Custom.iso", OverwritePrompt = true }; if (dialog.ShowDialog(this) != true) return;
-        await RunAsync("بناء ISO قابل للإقلاع", token => engine.BuildIsoAsync(Session(), dialog.FileName, token));
+        await RunAsync("بناء ISO قابل للإقلاع", async token => { await engine.BuildIsoAsync(Session(), dialog.FileName, token); Session().WorkflowStage = 5; Session().OutputIso = dialog.FileName; });
     }
     private void ResetStrong()
     {
@@ -219,9 +237,101 @@ public partial class MainWindow : Window
             Validation.Operation(operation);
             if (!plan.Any(o => o.Kind == operation.Kind && o.Target == operation.Target && o.Arguments == operation.Arguments && o.Registry == operation.Registry)) plan.Add(operation);
         }
-        AcknowledgeBox.IsChecked = false; EditorTabs.SelectedIndex = 4;
+        AcknowledgeBox.IsChecked = false; EditorTabs.SelectedItem = ReviewTab;
         return Task.CompletedTask;
     });
+    private sealed class SynchronousProgress(Action<PlannedOperation> report) : IProgress<PlannedOperation>
+    {
+        public void Report(PlannedOperation value) => report(value);
+    }
+    private async void ApproveNoChanges(object sender, RoutedEventArgs e) => await RunAsync("مراجعة صورة دون تعديلات", _ =>
+    {
+        if (Session().State != ImageState.Mounted || plan.Count != 0) throw new InvalidOperationException("هذا الخيار لصورة مركبة وخطة فارغة فقط.");
+        if (StrongMode.IsChecked == true && (strongReport is null || strongProjectId != Session().Id || strongReport.Operations.Count != 0))
+            throw new InvalidOperationException("حلّل التخفيف أولًا؛ إذا وُجدت تعديلات مقترحة، أضفها وطبّقها.");
+        Session().WorkflowStage = 3; return Task.CompletedTask;
+    });
+    private void SelectPro()
+    {
+        if (ImagesBox.ItemsSource is IEnumerable<ImageInfo> images)
+            ImagesBox.SelectedItem = images.FirstOrDefault(i => i.EditionId.Equals("Professional", StringComparison.OrdinalIgnoreCase)) ?? images.FirstOrDefault();
+    }
+    private void ResetAfterDiscard()
+    {
+        plan.Clear(); ResetStrong(); Session().WorkflowStage = 1; Session().OutputIso = null; EditorTabs.SelectedItem = PrepareTab;
+    }
+    private async void PrepareImage(object sender, RoutedEventArgs e) => await RunAsync("نسخ الإصدار وتركيب الصورة", async token =>
+    {
+        var session = Session();
+        if (session.State == ImageState.RecoveryRequired) throw new InvalidOperationException("استعد الجلسة المتعثرة أولًا من زر الاستعادة.");
+        var image = ImagesBox.SelectedItem as ImageInfo ?? throw new InvalidOperationException("اختر إصدار Windows.");
+        if (StrongMode.IsChecked == true && !image.EditionId.Equals("Professional", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("مسار التخفيف القوي مخصص لإصدار Windows Pro القياسي فقط.");
+        if (!File.Exists(session.WorkingWim)) await engine.ImportAsync(session, image, token);
+        if (session.State != ImageState.Mounted) await engine.MountAsync(session, token);
+        session.WorkflowStage = 2; session.OutputIso = null;
+        EditorTabs.SelectedItem = StrongMode.IsChecked == true ? StrongTab : ComponentsTab;
+    });
+    private void ModeChanged(object sender, RoutedEventArgs e)
+    {
+        if (!initialized) return;
+        if (project is not null) project.WorkflowMode = StrongMode.IsChecked == true ? "Strong" : "Manual";
+        RefreshJourney();
+        if (EditorTabs.SelectedItem is TabItem selected && selected.Visibility != Visibility.Visible)
+            EditorTabs.SelectedItem = StrongMode.IsChecked == true ? StrongTab : ComponentsTab;
+    }
+    private void ClearPlan(object sender, RoutedEventArgs e)
+    {
+        if (busy) return;
+        plan.Clear(); AcknowledgeBox.IsChecked = false; ResetStrong(); RefreshJourney();
+    }
+    private void GoStep(object sender, RoutedEventArgs e)
+    {
+        if (busy || sender is not Button button || !int.TryParse(button.Tag?.ToString(), out int step)) return;
+        EditorTabs.SelectedItem = step switch { 1 => SourceTab, 2 => PrepareTab, 3 => StrongMode.IsChecked == true ? StrongTab : ComponentsTab, 4 => ReviewTab, _ => OutputTab };
+    }
+    private void NextStep(object sender, RoutedEventArgs e)
+    {
+        int stage = project?.WorkflowStage ?? 0;
+        if (stage == 0) EditorTabs.SelectedItem = SourceTab;
+        else if (stage == 1) EditorTabs.SelectedItem = PrepareTab;
+        else if (stage == 2) EditorTabs.SelectedItem = plan.Count > 0 ? ReviewTab : StrongMode.IsChecked == true ? StrongTab : ComponentsTab;
+        else if (stage == 3) EditorTabs.SelectedItem = ReviewTab;
+        else EditorTabs.SelectedItem = OutputTab;
+    }
+    private void RefreshJourney()
+    {
+        if (!initialized) return;
+        bool strong = StrongMode.IsChecked == true;
+        ComponentsTab.Visibility = IntegrationTab.Visibility = RegistryTab.Visibility = strong ? Visibility.Collapsed : Visibility.Visible;
+        StrongTab.Visibility = strong ? Visibility.Visible : Visibility.Collapsed;
+        StrongMode.IsEnabled = ManualMode.IsEnabled = !busy && plan.Count == 0;
+        NextButton.IsEnabled = !busy;
+        int stage = project?.WorkflowStage ?? 0;
+        bool recovery = project?.State == ImageState.RecoveryRequired;
+        Button[] buttons = [Step1, Step2, Step3, Step4, Step5];
+        string[] titles = ["① المصدر", "② اختيار Pro وتركيبه", "③ التعديلات", "④ التطبيق والحفظ", "⑤ إنشاء ISO"];
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            // The modifications step completes only after every operation succeeds.
+            bool done = stage >= i + 1 && (!recovery || i == 0) && (i != 4 || File.Exists(project?.OutputIso));
+            buttons[i].Content = (done ? "✓ " : "") + titles[i];
+            buttons[i].IsEnabled = !busy && (i == 0 || project is not null);
+            buttons[i].Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(done ? "#145C48" : "#26364A"));
+        }
+        ImagesBox.IsEnabled = !busy && project?.Image is null;
+        BuildIsoButton.IsEnabled = !busy && project?.State == ImageState.Committed && plan.Count == 0;
+        OutputPathBox.Text = project?.OutputIso ?? "لم يُنشأ ملف ISO بعد.";
+        GuideText.Text = recovery ? "توقفت العملية: افتح الخطوة ② لاستعادة جلسة المشروع وتجاهل التعديلات غير المحفوظة، ثم أعد تجهيز الصورة." : stage switch
+        {
+            0 => "① اختر ISO وحدد مجلد المشروع ثم اضغط إنشاء المشروع.",
+            1 => "② اختر Windows Pro ثم اضغط تجهيز الإصدار وتركيبه.",
+            2 => plan.Count > 0 ? "④ راجع الخطة وحدد الإقرار، ثم طبّق التعديلات." : strong ? "③ اضغط تحليل الصورة، راجع التقرير، ثم أضف التخفيف إلى الخطة." : "③ اقرأ المكونات وأضف اختياراتك إلى الخطة، ثم افتح الخطوة ④.",
+            3 => "④ نجح التطبيق. راجع التقرير ثم اضغط حفظ الصورة وإلغاء التركيب.",
+            4 => "⑤ حُفظت الصورة. يمكنك الآن إنشاء ISO.",
+            _ => "✓ اكتملت الخطوات وحُفظ ISO في المسار المعروض في الخطوة ⑤."
+        };
+    }
     private void CancelClick(object sender, RoutedEventArgs e) { cancellation?.Cancel(); CancelButton.IsEnabled = false; StatusLabel.Text = "طُلب التوقف؛ انتظار اكتمال خطوة النظام الحالية."; }
     private void WindowClosing(object? sender, CancelEventArgs e)
     {
