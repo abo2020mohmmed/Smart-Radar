@@ -57,7 +57,9 @@ internal static class OfflineSetupTests
                 int result = WofSetFileDataLocation(handle, 2, ref info, 8);
                 Marshal.ThrowExceptionForHR(result);
             }
-            Check(File.GetAttributes(file).HasFlag(FileAttributes.ReparsePoint), "compact did not create WOF fixture");
+            uint size = 8;
+            Marshal.ThrowExceptionForHR(WofIsExternalFile(file, out int external, out uint provider, out CompressionInfo compression, ref size));
+            Check(external != 0 && provider == 2 && compression.Algorithm == 1, $"WOF fixture was not external: external={external}, provider={provider}, algorithm={compression.Algorithm}");
             OfflineSetupFile.DeleteOneDrive(root, "SysWOW64"); Check(!File.Exists(file), "WOF installer remains");
         }));
     }
@@ -65,6 +67,9 @@ internal static class OfflineSetupTests
     [DllImport("WofUtil.dll", ExactSpelling = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern int WofSetFileDataLocation(SafeFileHandle file, uint provider, ref CompressionInfo info, uint size);
+    [DllImport("WofUtil.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern int WofIsExternalFile(string path, out int external, out uint provider, out CompressionInfo info, ref uint size);
     private static void MountedWim()
     {
         string root = Path.Combine(Path.GetTempPath(), "WIS-WimTest-" + Guid.NewGuid().ToString("N"));

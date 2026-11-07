@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -39,6 +41,17 @@ public partial class MainWindow : Window
         plan.CollectionChanged += (_, _) => { if (project is not null) { project.WorkflowStage = Math.Min(project.WorkflowStage, 2); project.OutputIso = null; } RefreshJourney(); };
         RefreshJourney();
     }
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        int enabled = 1;
+        IntPtr handle = new WindowInteropHelper(this).Handle;
+        if (DwmSetWindowAttribute(handle, 20, ref enabled, sizeof(int)) != 0)
+            _ = DwmSetWindowAttribute(handle, 19, ref enabled, sizeof(int));
+    }
+    [DllImport("dwmapi.dll", ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
     private ImageEngine NewEngine()
     {
         var defaults = ToolSettings.WindowsDefaults();
@@ -110,7 +123,8 @@ public partial class MainWindow : Window
         await RunAsync("فتح المشروع", async token =>
         {
             if (project?.State is ImageState.Mounted or ImageState.RecoveryRequired) throw new InvalidOperationException("ألغِ تركيب المشروع الحالي أو استعده أولًا.");
-            plan.Clear(); project = await store.LoadAsync(dialog.FolderName, token); ResetStrong();
+            var loaded = await store.LoadAsync(dialog.FolderName, token);
+            plan.Clear(); project = loaded; ResetStrong();
             StrongMode.IsChecked = project.WorkflowMode != "Manual"; ManualMode.IsChecked = project.WorkflowMode == "Manual";
             ImagesBox.ItemsSource = project.Image is null ? await engine.InspectAsync(project, token) : new[] { project.Image };
             SelectPro();
