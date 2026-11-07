@@ -18,6 +18,8 @@ public partial class MainWindow : Window
     private ProjectSession? project;
     private CancellationTokenSource? cancellation;
     private bool busy;
+    private AggressiveReport? strongReport;
+    private string? strongProjectId;
     private readonly object logLock = new();
     private readonly string logPath;
     public MainWindow()
@@ -87,7 +89,7 @@ public partial class MainWindow : Window
     {
         if (project?.State is ImageState.Mounted or ImageState.RecoveryRequired) throw new InvalidOperationException("ألغِ تركيب المشروع الحالي أو استعده قبل فتح مشروع آخر.");
         project = await engine.CreateAsync(SourceBox.Text, WorkspaceBox.Text, token);
-        plan.Clear(); ImagesBox.ItemsSource = await engine.InspectAsync(project, token); ImagesBox.SelectedIndex = 0;
+        plan.Clear(); ResetStrong(); ImagesBox.ItemsSource = await engine.InspectAsync(project, token); ImagesBox.SelectedIndex = 0;
     });
     private async void OpenProject(object sender, RoutedEventArgs e)
     {
@@ -95,7 +97,7 @@ public partial class MainWindow : Window
         await RunAsync("فتح المشروع", async token =>
         {
             if (project?.State is ImageState.Mounted or ImageState.RecoveryRequired) throw new InvalidOperationException("ألغِ تركيب المشروع الحالي أو استعده أولًا.");
-            project = await store.LoadAsync(dialog.FolderName, token); plan.Clear();
+            project = await store.LoadAsync(dialog.FolderName, token); plan.Clear(); ResetStrong();
             ImagesBox.ItemsSource = project.Image is null ? await engine.InspectAsync(project, token) : new[] { project.Image };
             ImagesBox.SelectedIndex = 0;
         });
@@ -167,6 +169,12 @@ public partial class MainWindow : Window
         var snapshot = plan.ToArray(); if (snapshot.Length == 0) throw new InvalidOperationException("الخطة فارغة.");
         var completed = new Progress<PlannedOperation>(operation => plan.Remove(operation));
         await engine.ApplyAsync(Session(), snapshot, token, completed); plan.Clear(); AcknowledgeBox.IsChecked = false;
+        if (engine.OperationNotices.Count > 0)
+        {
+            StrongStatus.Text = "نتيجة التطبيق — راجع العناصر التي بقيت:" + Environment.NewLine + string.Join(Environment.NewLine, engine.OperationNotices);
+            foreach (string notice in engine.OperationNotices) Log(notice);
+            MessageBox.Show(this, StrongStatus.Text, "تقرير التخفيف", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
     });
     private async void CommitImage(object sender, RoutedEventArgs e) => await RunAsync("حفظ الصورة وإلغاء التركيب", token => engine.UnmountAsync(Session(), true, token));
     private async void DiscardImage(object sender, RoutedEventArgs e)
@@ -184,6 +192,36 @@ public partial class MainWindow : Window
         var dialog = new SaveFileDialog { Filter = "ISO image|*.iso", FileName = "Windows-Custom.iso", OverwritePrompt = true }; if (dialog.ShowDialog(this) != true) return;
         await RunAsync("بناء ISO قابل للإقلاع", token => engine.BuildIsoAsync(Session(), dialog.FileName, token));
     }
+    private void ResetStrong()
+    {
+        strongReport = null; strongProjectId = null; StrongPreview.ItemsSource = null;
+        StrongStatus.Text = "ركّب صورة Pro ثم حلّلها. المتجر والطباعة محفوظان في التخفيف التلقائي.";
+        FeaturesGrid.ItemsSource = null; PackagesGrid.ItemsSource = null; DriversGrid.ItemsSource = null; AppsGrid.ItemsSource = null; ServicesGrid.ItemsSource = null;
+    }
+    private async void AnalyzeStrong(object sender, RoutedEventArgs e) => await RunAsync("تحليل التخفيف القوي لصورة Pro", async token =>
+    {
+        strongReport = null; strongProjectId = null; StrongPreview.ItemsSource = null;
+        var options = new AggressiveOptions(StrongDefenderBox.IsChecked == true, StrongLanguagesBox.IsChecked == true);
+        var report = await engine.AnalyzeAggressiveAsync(Session(), options, token);
+        strongReport = report; strongProjectId = Session().Id;
+        StrongPreview.ItemsSource = report.Operations;
+        StrongStatus.Text = "الإصدار: " + report.Profile.EditionId + " | Build " + report.Profile.Build + Environment.NewLine +
+            "عدد الخطوات المقترحة: " + report.Operations.Count + Environment.NewLine +
+            string.Join(Environment.NewLine, report.Notes.Select(n => "• " + n));
+    });
+    private async void QueueStrong(object sender, RoutedEventArgs e) => await RunAsync("إضافة التخفيف للخطة القابلة للمراجعة", _ =>
+    {
+        if (strongReport is null || strongProjectId != Session().Id) throw new InvalidOperationException("حلّل صورة المشروع الحالي أولًا.");
+        if (strongReport.Options != new AggressiveOptions(StrongDefenderBox.IsChecked == true, StrongLanguagesBox.IsChecked == true)) throw new InvalidOperationException("تغيّرت خيارات التخفيف؛ أعد التحليل أولًا.");
+        foreach (var operation in plan.Where(o => o.PresetId == AggressivePreset.Id).ToArray()) plan.Remove(operation);
+        foreach (var operation in strongReport.Operations)
+        {
+            Validation.Operation(operation);
+            if (!plan.Any(o => o.Kind == operation.Kind && o.Target == operation.Target && o.Arguments == operation.Arguments && o.Registry == operation.Registry)) plan.Add(operation);
+        }
+        AcknowledgeBox.IsChecked = false; EditorTabs.SelectedIndex = 4;
+        return Task.CompletedTask;
+    });
     private void CancelClick(object sender, RoutedEventArgs e) { cancellation?.Cancel(); CancelButton.IsEnabled = false; StatusLabel.Text = "طُلب التوقف؛ انتظار اكتمال خطوة النظام الحالية."; }
     private void WindowClosing(object? sender, CancelEventArgs e)
     {

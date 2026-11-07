@@ -16,6 +16,8 @@ public static class DismCommands
         args.AddRange(operation.Kind switch
         {
             OperationKind.EnableFeature => ["/Enable-Feature", "/FeatureName:" + operation.Target, "/All"],
+            OperationKind.RemoveFeaturePayload => ["/Disable-Feature", "/FeatureName:" + operation.Target, "/Remove"],
+            OperationKind.RemoveCapability => ["/Remove-Capability", "/CapabilityName:" + operation.Target],
             OperationKind.DisableFeature => ["/Disable-Feature", "/FeatureName:" + operation.Target],
             OperationKind.RemovePackage => ["/Remove-Package", "/PackageName:" + operation.Target],
             OperationKind.AddPackage => ["/Add-Package", "/PackagePath:" + operation.Target],

@@ -13,6 +13,8 @@ public sealed class ImageEngine : IDisposable
     private readonly string script;
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly OfflineRegistry registry;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> operationNotices = new();
+    public IReadOnlyList<string> OperationNotices => operationNotices.ToArray();
     public ImageEngine(ICommandRunner runner, IProjectStore store, ToolSettings tools, string script)
     {
         this.runner = runner; this.store = store; this.tools = tools;
@@ -93,7 +95,8 @@ public sealed class ImageEngine : IDisposable
             project.State = ImageState.Mounted;
         }).ConfigureAwait(false);
     }, token);
-    public Task<Inventory> InventoryAsync(ProjectSession project, CancellationToken token) => ExclusiveAsync(async () =>
+    public Task<Inventory> InventoryAsync(ProjectSession project, CancellationToken token) => ExclusiveAsync(() => ReadInventoryCoreAsync(project, token), token);
+    private async Task<Inventory> ReadInventoryCoreAsync(ProjectSession project, CancellationToken token)
     {
         RequireMounted(project);
         Inventory? inventory = null;
@@ -104,11 +107,24 @@ public sealed class ImageEngine : IDisposable
             project.State = ImageState.Mounted;
         }).ConfigureAwait(false);
         return inventory!;
+    }
+    public Task<AggressiveReport> AnalyzeAggressiveAsync(ProjectSession project, AggressiveOptions options, CancellationToken token) => ExclusiveAsync(async () =>
+    {
+        var inventory = await ReadInventoryCoreAsync(project, token).ConfigureAwait(false);
+        var report = AggressivePreset.Build(inventory, options);
+        await File.WriteAllTextAsync(Path.Combine(project.Root, "aggressive-report.json"), JsonSerializer.Serialize(report, ProjectStore.JsonOptions), token).ConfigureAwait(false);
+        return report;
     }, token);
     public Task ApplyAsync(ProjectSession project, IReadOnlyList<PlannedOperation> operations, CancellationToken token, IProgress<PlannedOperation>? completed = null) => ExclusiveAsync(async () =>
     {
         RequireMounted(project);
         foreach (var operation in operations) Validation.Operation(operation);
+        operationNotices.Clear();
+        if (operations.Any(o => o.PresetId is not null))
+        {
+            var fresh = await ReadInventoryCoreAsync(project, token).ConfigureAwait(false);
+            AggressivePreset.ValidatePlan(operations, fresh);
+        }
         await File.WriteAllTextAsync(Path.Combine(project.Root, "last-plan.json"), JsonSerializer.Serialize(operations, ProjectStore.JsonOptions), token).ConfigureAwait(false);
         foreach (var operation in operations)
         {
@@ -120,7 +136,10 @@ public sealed class ImageEngine : IDisposable
                     case OperationKind.SetRegistry:
                         await registry.SetValueAsync(project, operation.Registry!, token).ConfigureAwait(false); break;
                     case OperationKind.SetServiceStart:
-                        await registry.SetServiceAsync(project, operation.Target, int.Parse(operation.Arguments, CultureInfo.InvariantCulture), token).ConfigureAwait(false); break;
+                        await registry.SetServiceAsync(project, operation.Target, int.Parse(operation.Arguments, CultureInfo.InvariantCulture), token, operation.PresetId == AggressivePreset.Id).ConfigureAwait(false); break;
+                    case OperationKind.RemoveOneDrive:
+                        foreach (string notice in await registry.RemoveOneDriveAsync(project, token).ConfigureAwait(false)) operationNotices.Enqueue(notice);
+                        break;
                     case OperationKind.StageInstaller:
                         await InstallerStager.StageAsync(project.MountPath, operation.Target, operation.Arguments, token).ConfigureAwait(false); break;
                     case OperationKind.WriteUnattend:
@@ -134,6 +153,13 @@ public sealed class ImageEngine : IDisposable
                 project.State = ImageState.Mounted;
             }).ConfigureAwait(false);
             completed?.Report(operation);
+        }
+        if (operations.Any(o => o.PresetId == AggressivePreset.Id))
+        {
+            var after = await ReadInventoryCoreAsync(project, token).ConfigureAwait(false);
+            string summary = AggressivePreset.AfterApplySummary(after);
+            operationNotices.Enqueue(summary);
+            await File.WriteAllTextAsync(Path.Combine(project.Root, "aggressive-after.txt"), string.Join(Environment.NewLine, OperationNotices), token).ConfigureAwait(false);
         }
     }, token);
     public Task UnmountAsync(ProjectSession project, bool commit, CancellationToken token) => ExclusiveAsync(async () =>

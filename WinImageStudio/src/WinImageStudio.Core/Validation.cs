@@ -74,10 +74,12 @@ public static partial class Validation
     }
     public static void Operation(PlannedOperation operation)
     {
+        if (operation.PresetId is not null && operation.PresetId != AggressivePreset.Id) throw new ArgumentException("Unknown preset identifier.");
         switch (operation.Kind)
         {
             case OperationKind.EnableFeature:
             case OperationKind.DisableFeature:
+            case OperationKind.RemoveFeaturePayload:
             case OperationKind.SetServiceStart:
                 Identifier(operation.Target); break;
             case OperationKind.RemoveDriver:
@@ -87,6 +89,12 @@ public static partial class Validation
             case OperationKind.RemovePackage:
             case OperationKind.RemoveProvisionedApp:
                 PackageIdentity(operation.Target); break;
+            case OperationKind.RemoveCapability:
+                if (AggressivePreset.CapabilityLanguage(operation.Target) == "") throw new ArgumentException("Invalid language capability name.");
+                break;
+            case OperationKind.RemoveOneDrive:
+                if (operation.Target != "OneDrive" || operation.Arguments != "") throw new ArgumentException("Invalid scoped OneDrive operation.");
+                break;
             case OperationKind.AddPackage: ExistingFile(operation.Target, ".cab", ".msu"); break;
             case OperationKind.AddDriver: ExistingFile(operation.Target, ".inf"); break;
             case OperationKind.SetRegistry:

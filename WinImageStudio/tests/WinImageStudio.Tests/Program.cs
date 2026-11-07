@@ -180,6 +180,51 @@ try
         }
     });
 
+
+    await Test("Strong analysis journals real inventory and saves a reviewable report", async () =>
+    {
+        var project = await NewEngineProject("engine-strong-analyze"); project.State = ImageState.Mounted;
+        var runner = new FakeRunner(_ => Task.FromResult(new ProcessResult(0, JsonSerializer.Serialize(StrongPresetTests.Sample()), "")));
+        using var engine = Engine(runner); var report = await engine.AnalyzeAggressiveAsync(project, new(), default);
+        Equal(AggressivePreset.Id, report.PresetId); Equal(1, runner.Calls.Count); Equal(ImageState.Mounted, project.State);
+        Equal(true, File.Exists(Path.Combine(project.Root, "aggressive-report.json")));
+    });
+    await Test("Strong plan revalidates before DISM and reports surviving Defender", async () =>
+    {
+        var project = await NewEngineProject("engine-strong-apply"); project.State = ImageState.Mounted;
+        var inventory = StrongPresetTests.Sample();
+        var operation = AggressivePreset.Build(inventory,new()).Operations.First(o=>o.Kind==OperationKind.RemoveProvisionedApp && o.Target.StartsWith("Microsoft.GetHelp_"));
+        var runner = new FakeRunner(args => Task.FromResult(new ProcessResult(0,args.Contains("Inventory") ? JsonSerializer.Serialize(inventory) : "", "")));
+        using var engine = Engine(runner); await engine.ApplyAsync(project, [operation], default);
+        Equal(3, runner.Calls.Count); Equal(true, runner.Calls[0].Contains("Inventory")); Equal(true, runner.Calls[1].Contains("/Remove-ProvisionedAppxPackage")); Equal(true, runner.Calls[2].Contains("Inventory"));
+        Equal(true, engine.OperationNotices.Any(n=>n.Contains("لم تتم إزالته بالكامل"))); Equal(true, File.Exists(Path.Combine(project.Root,"aggressive-after.txt")));
+    });
+    await Test("Strong plan rejects a non-Pro image before any servicing mutation", async () =>
+    {
+        var project = await NewEngineProject("engine-strong-wrong-edition"); project.State = ImageState.Mounted;
+        var inventory = StrongPresetTests.Sample(); inventory=inventory with { Profile=inventory.Profile! with { EditionId="Core" } };
+        var runner = new FakeRunner(_=>Task.FromResult(new ProcessResult(0,JsonSerializer.Serialize(inventory),"")));
+        using var engine = Engine(runner);
+        try { await engine.ApplyAsync(project,[new(OperationKind.DisableFeature,"TelnetClient",PresetId:AggressivePreset.Id)],default); throw new Exception("Expected edition rejection"); } catch (InvalidOperationException) { }
+        Equal(1,runner.Calls.Count); Equal(ImageState.Mounted,project.State);
+    });
+    await Test("Tampered strong service plan is rejected before registry writes", async () =>
+    {
+        var project = await NewEngineProject("engine-strong-tamper"); project.State=ImageState.Mounted;
+        var runner = new FakeRunner(_=>Task.FromResult(new ProcessResult(0,JsonSerializer.Serialize(StrongPresetTests.Sample()),"")));
+        using var engine=Engine(runner);
+        try { await engine.ApplyAsync(project,[new(OperationKind.SetServiceStart,"WinDefend","4",PresetId:AggressivePreset.Id)],default); throw new Exception("Expected canonical-plan rejection"); } catch (InvalidOperationException) { }
+        Equal(1,runner.Calls.Count); Equal(ImageState.Mounted,project.State);
+    });
+    await Test("Strong preflight query failure retains recovery state", async () =>
+    {
+        var project = await NewEngineProject("engine-strong-preflight-fail"); project.State=ImageState.Mounted;
+        var runner = new FakeRunner(_=>Task.FromResult(new ProcessResult(87,"","mocked inventory error")));
+        using var engine=Engine(runner);
+        try { await engine.AnalyzeAggressiveAsync(project,new(),default); throw new Exception("Expected native query failure"); } catch (ToolException) { }
+        Equal(ImageState.RecoveryRequired,project.State); Equal(1,runner.Calls.Count);
+    });
+    foreach (var test in StrongPresetTests.Cases()) await Test(test.Name, () => Sync(test.Body));
     if (!OperatingSystem.IsWindows())
     {
         await Test("Reparse/symlink output path rejected", () => Sync(() =>
