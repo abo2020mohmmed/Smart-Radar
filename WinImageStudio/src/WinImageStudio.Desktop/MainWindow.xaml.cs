@@ -309,6 +309,7 @@ public partial class MainWindow : Window
     private void NextStep(object sender, RoutedEventArgs e)
     {
         int stage = project?.WorkflowStage ?? 0;
+        if (project?.State == ImageState.RecoveryRequired) { EditorTabs.SelectedItem = PrepareTab; return; }
         if (stage == 0) EditorTabs.SelectedItem = SourceTab;
         else if (stage == 1) EditorTabs.SelectedItem = PrepareTab;
         else if (stage == 2) EditorTabs.SelectedItem = plan.Count > 0 ? ReviewTab : StrongMode.IsChecked == true ? StrongTab : ComponentsTab;
@@ -341,6 +342,10 @@ public partial class MainWindow : Window
             });
             buttons[i].Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(done ? "#145C48" : "#26364A"));
         }
+        ApplyPlanButton.Content = (stage >= 3 && !recovery ? "✓ " : "") + "④ أ · تطبيق الخطة";
+        CommitButton.Content = (stage >= 4 && !recovery ? "✓ " : "") + "④ ب · حفظ الصورة وإلغاء التركيب";
+        ApplyPlanButton.IsEnabled = !busy && project?.State == ImageState.Mounted && plan.Count > 0;
+        CommitButton.IsEnabled = !busy && project?.State == ImageState.Mounted && stage >= 3 && plan.Count == 0;
         ImagesBox.IsEnabled = !busy && project?.Image is null;
         BuildIsoButton.IsEnabled = !busy && project?.State == ImageState.Committed && plan.Count == 0;
         OutputPathBox.Text = project?.OutputIso ?? "لم يُنشأ ملف ISO بعد.";

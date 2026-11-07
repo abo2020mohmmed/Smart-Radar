@@ -70,8 +70,9 @@ try
     await Test("Project journal atomic roundtrip", async () =>
     {
         string folder = Path.Combine(root, "project"); Directory.CreateDirectory(folder);
-        var session = new ProjectSession { Root = folder, Source = "source.wim", WorkingWim = Path.Combine(folder, "install.wim"), MountPath = Path.Combine(folder, "mount"), State = ImageState.RecoveryRequired, PendingOperation = "Mount image" };
+        var session = new ProjectSession { Root = folder, Source = "source.wim", WorkingWim = Path.Combine(folder, "install.wim"), MountPath = Path.Combine(folder, "mount"), State = ImageState.RecoveryRequired, PendingOperation = "Mount image", WorkflowStage = 2, WorkflowMode = "Manual", OutputIso = Path.Combine(folder, "result.iso") };
         var store = new ProjectStore(); await store.SaveAsync(session); var loaded = await store.LoadAsync(folder);
+        Equal(2, loaded.WorkflowStage); Equal("Manual", loaded.WorkflowMode); Equal(session.OutputIso, loaded.OutputIso);
         Equal(session.Id, loaded.Id); Equal(ImageState.RecoveryRequired, loaded.State); Equal("Mount image", loaded.PendingOperation);
         Equal(0, Directory.GetFiles(folder, "*.tmp").Length);
     });
