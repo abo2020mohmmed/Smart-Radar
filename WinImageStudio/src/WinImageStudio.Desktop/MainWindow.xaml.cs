@@ -57,17 +57,19 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             StatusLabel.Text = "فشلت العملية؛ راجع السجل وحالة المشروع.";
-            Log(ex.ToString()); MessageBox.Show(this, ex.Message, "WinImageStudio", MessageBoxButton.OK, MessageBoxImage.Error);
+            Log(ex.ToString()); UpdateSessionLabel(); RefreshJourney();
+            string help = project?.State == ImageState.RecoveryRequired ? "\n\nافتح الخطوة ② لاستعادة الجلسة. الاستعادة تتجاهل التعديلات غير المحفوظة؛ بعدها أعد التجهيز والتحليل." : "";
+            MessageBox.Show(this, ex.Message + help, "WinImageStudio", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
-            cancellation.Dispose(); cancellation = null; busy = false; EditorTabs.IsEnabled = true; CancelButton.IsEnabled = false; Progress.IsIndeterminate = false;
+            cancellation.Dispose(); cancellation = null; CancelButton.IsEnabled = false; Progress.IsIndeterminate = false;
             if (project is not null)
             {
                 try { await store.SaveAsync(project); }
                 catch (Exception ex) { Log("تعذر حفظ تقدم الواجهة: " + ex.Message); StatusLabel.Text = "تعذر حفظ تقدم المشروع؛ راجع السجل."; }
             }
-            UpdateSessionLabel(); RefreshJourney();
+            busy = false; EditorTabs.IsEnabled = true; UpdateSessionLabel(); RefreshJourney();
         }
     }
     private void UpdateSessionLabel() => SessionLabel.Text = project is null ? "لا يوجد مشروع مفتوح" : $"{project.Image?.ImageName ?? "المصدر"} | {project.State}\n{project.Root}\n{project.PendingOperation}";
@@ -316,7 +318,13 @@ public partial class MainWindow : Window
             // The modifications step completes only after every operation succeeds.
             bool done = stage >= i + 1 && (!recovery || i == 0) && (i != 4 || File.Exists(project?.OutputIso));
             buttons[i].Content = (done ? "✓ " : "") + titles[i];
-            buttons[i].IsEnabled = !busy && (i == 0 || project is not null);
+            buttons[i].IsEnabled = !busy && (i switch
+            {
+                0 => true,
+                1 => project is not null,
+                2 or 3 => project?.State == ImageState.Mounted,
+                _ => project?.State == ImageState.Committed
+            });
             buttons[i].Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(done ? "#145C48" : "#26364A"));
         }
         ImagesBox.IsEnabled = !busy && project?.Image is null;

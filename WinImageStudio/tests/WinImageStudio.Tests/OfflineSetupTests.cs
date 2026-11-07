@@ -1,5 +1,7 @@
 #pragma warning disable CA1416
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using WinImageStudio.Core;
 
 internal static class OfflineSetupTests
@@ -46,12 +48,23 @@ internal static class OfflineSetupTests
         yield return ("Windows commits OneDrive deletion in a real mounted WIM", MountedWim);
         yield return ("Windows deletes a real WOF compacted installer", () => Fixture(root =>
         {
-            string file = Installer(root); File.WriteAllBytes(file, new byte[1024 * 1024]);
-            Run("compact.exe", "/c", "/exe:lzx", "/i", "/q", file);
+            string file = Installer(root);
+            byte[] data = new byte[1024 * 1024]; for (int i = 0; i < data.Length; i++) data[i] = (byte)(i % 251);
+            File.WriteAllBytes(file, data);
+            using (var handle = File.OpenHandle(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                var info = new CompressionInfo { Algorithm = 1, Flags = 0 }; // WOF LZX, FILE provider
+                int result = WofSetFileDataLocation(handle, 2, ref info, 8);
+                Marshal.ThrowExceptionForHR(result);
+            }
             Check(File.GetAttributes(file).HasFlag(FileAttributes.ReparsePoint), "compact did not create WOF fixture");
             OfflineSetupFile.DeleteOneDrive(root, "SysWOW64"); Check(!File.Exists(file), "WOF installer remains");
         }));
     }
+    [StructLayout(LayoutKind.Sequential)] private struct CompressionInfo { public uint Algorithm; public uint Flags; }
+    [DllImport("WofUtil.dll", ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern int WofSetFileDataLocation(SafeFileHandle file, uint provider, ref CompressionInfo info, uint size);
     private static void MountedWim()
     {
         string root = Path.Combine(Path.GetTempPath(), "WIS-WimTest-" + Guid.NewGuid().ToString("N"));

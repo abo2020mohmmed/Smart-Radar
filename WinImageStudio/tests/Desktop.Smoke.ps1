@@ -23,7 +23,7 @@ try {
     }
     foreach ($id in @('Step1','Step2','Step3','Step4','Step5','NextButton','StrongMode','ManualMode')) {
         $control = Find-Control $id
-        if ($control.Current.Name -like '*✓*') { throw "False initial completion: $id" }
+        if ($control.Current.Name.Contains([string][char]0x2713)) { throw "False initial completion: $id" }
     }
     $manual = Find-Control 'ManualMode'
     $manual.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
