@@ -19,20 +19,9 @@ try {
             $volume = @($disk | Get-Volume | Where-Object DriveLetter)[0]
             if (!$volume) { throw 'Mounted ISO has no readable volume.' }
             $root = $volume.DriveLetter + ':\'
-            New-Item -ItemType Directory -Path $Destination | Out-Null
-            $pending = New-Object 'System.Collections.Generic.Stack[string]'
-            $pending.Push($root)
-            while ($pending.Count -gt 0) {
-                $directory = $pending.Pop()
-                foreach ($item in Get-ChildItem -LiteralPath $directory -Force) {
-                    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'ISO contains an unsupported reparse point.' }
-                    $relative = $item.FullName.Substring($root.Length)
-                    $target = Join-Path $Destination $relative
-                    if ($item.PSIsContainer) { New-Item -ItemType Directory -Path $target -Force | Out-Null; $pending.Push($item.FullName) }
-                    else { Copy-Item -LiteralPath $item.FullName -Destination $target; (Get-Item -LiteralPath $target).IsReadOnly = $false }
-                }
-            }
-            Write-Output '{"extracted":true}'
+            . (Join-Path $PSScriptRoot 'MediaCopy.ps1')
+            $copied = Copy-WisMediaDirectory -SourceRoot $root -DestinationRoot $Destination
+            [pscustomobject]@{ extracted=$true; files=[long]$copied.FilesCopied; bytes=[long]$copied.BytesCopied } | ConvertTo-Json -Compress
         } finally { if ($owned) { Dismount-DiskImage -ImagePath $Source | Out-Null } }
         exit 0
     }

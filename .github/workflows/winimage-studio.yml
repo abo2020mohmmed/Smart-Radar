@@ -32,15 +32,23 @@ jobs:
       - name: Parse Windows PowerShell scripts
         shell: powershell
         run: |
-          foreach ($file in @('build.ps1','src/WinImageStudio.Desktop/Scripts/ImageTools.ps1')) {
+          foreach ($file in @('build.ps1','src/WinImageStudio.Desktop/Scripts/ImageTools.ps1','src/WinImageStudio.Desktop/Scripts/MediaCopy.ps1','tests/MediaCopy.Tests.ps1')) {
             $tokens = $null; $parseErrors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD $file), [ref]$tokens, [ref]$parseErrors) | Out-Null
             if ($parseErrors.Count) { $parseErrors | Format-List; exit 1 }
           }
+      - name: Regression tests for ISO file copying
+        shell: powershell
+        run: |
+          & ./tests/MediaCopy.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build Windows executable
         run: |
           dotnet publish src/WinImageStudio.Desktop/WinImageStudio.Desktop.csproj -c Release -r win-x64 --self-contained true -o artifacts/win-x64
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($required in @('WinImageStudio.exe','Scripts/ImageTools.ps1','Scripts/MediaCopy.ps1','Start-WinImageStudio.cmd')) {
+            if (!(Test-Path -LiteralPath (Join-Path 'artifacts/win-x64' $required))) { throw "Published package is missing $required" }
+          }
           Copy-Item README.ar.md,LICENSE -Destination artifacts/win-x64
           Copy-Item third-party -Destination artifacts/win-x64 -Recurse
           Compress-Archive -Path artifacts/win-x64/* -DestinationPath artifacts/WinImageStudio-windows-x64.zip
