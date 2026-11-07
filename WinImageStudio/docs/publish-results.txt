@@ -1,0 +1,6 @@
+  Determining projects to restore...
+  Restored /workspace/work/WinImageStudio/src/WinImageStudio.Core/WinImageStudio.Core.csproj (in 218 ms).
+  Restored /workspace/work/WinImageStudio/src/WinImageStudio.Desktop/WinImageStudio.Desktop.csproj (in 223 ms).
+  WinImageStudio.Core -> /workspace/work/WinImageStudio/src/WinImageStudio.Core/bin/Release/net10.0/WinImageStudio.Core.dll
+  WinImageStudio.Desktop -> /workspace/work/WinImageStudio/src/WinImageStudio.Desktop/bin/Release/net10.0-windows/win-x64/WinImageStudio.dll
+  WinImageStudio.Desktop -> /workspace/work/WinImageStudio/artifacts/win-x64/

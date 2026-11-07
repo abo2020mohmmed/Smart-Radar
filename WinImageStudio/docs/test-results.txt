@@ -1,0 +1,44 @@
+PASS DISM export keeps paths with spaces in single arguments
+PASS Discard does not request commit-only integrity check
+PASS Commit checks image integrity
+PASS Invalid registry enum rejected
+PASS Empty unattended language rejected
+PASS Invalid export index rejected
+PASS Feature command has offline target and no restart
+PASS Feature switch injection rejected
+PASS Unknown operation rejected
+PASS Inbox driver removal rejected
+PASS Third-party driver removal allowed
+PASS Parent traversal rejected
+PASS Sibling prefix rejected
+PASS Root itself is not a descendant
+PASS Valid child allowed
+PASS Installer metacharacters rejected
+PASS Ordinary silent switches accepted
+PASS Registry traversal rejected
+PASS DWORD maximum supported
+PASS DWORD overflow rejected
+PASS Invalid binary rejected
+PASS Unattend schema namespaces and passes
+PASS Unattend XML escapes user values
+PASS Unattend invalid computer name rejected
+PASS Unattend invalid architecture rejected
+PASS Reboot exit accepted and failure retained
+PASS Project journal atomic roundtrip
+PASS Tampered project root rejected
+PASS Installer is staged, never executed on the host
+PASS Foreign SetupComplete script is preserved
+PASS ISO boot images required
+PASS ISO contains BIOS and UEFI boot entries
+PASS Mount journals recovery state before starting the tool
+PASS Failed mount remains recoverable with the original error
+PASS Plan validation completes before any mutation
+PASS Plan stops at the first failed servicing command
+PASS Cancellation between steps preserves completed image state
+PASS One engine serializes competing mount requests
+PASS Commit and discard end in distinct durable states
+PASS Reparse/symlink output path rejected
+PASS Process runner drains stdout and stderr
+PASS Cancellation does not kill a started servicing process
+PASS Cancellation before start prevents execution
+43 passed; 0 failed.

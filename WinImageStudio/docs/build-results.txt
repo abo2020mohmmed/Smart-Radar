@@ -1,0 +1,13 @@
+  Determining projects to restore...
+  Restored /workspace/work/WinImageStudio/src/WinImageStudio.Core/WinImageStudio.Core.csproj (in 106 ms).
+  Restored /workspace/work/WinImageStudio/src/WinImageStudio.Desktop/WinImageStudio.Desktop.csproj (in 151 ms).
+  1 of 3 projects are up-to-date for restore.
+  WinImageStudio.Core -> /workspace/work/WinImageStudio/src/WinImageStudio.Core/bin/Release/net10.0/WinImageStudio.Core.dll
+  WinImageStudio.Tests -> /workspace/work/WinImageStudio/tests/WinImageStudio.Tests/bin/Release/net10.0/WinImageStudio.Tests.dll
+  WinImageStudio.Desktop -> /workspace/work/WinImageStudio/src/WinImageStudio.Desktop/bin/Release/net10.0-windows/WinImageStudio.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:04.85

@@ -1,0 +1,2 @@
+PASS: /workspace/work/WinImageStudio/src/WinImageStudio.Desktop/Scripts/ImageTools.ps1
+PASS: /workspace/work/WinImageStudio/build.ps1
