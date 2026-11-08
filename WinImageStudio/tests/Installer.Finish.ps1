@@ -35,13 +35,14 @@ try {
             $controls = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
             foreach ($control in $controls) {
                 $name = ([string]$control.Current.Name).Replace('&','').Trim()
-                if ($name -eq 'I accept the agreement' -and $control.Current.IsEnabled -and $control.Current.ControlType -eq [System.Windows.Automation.ControlType]::RadioButton) {
+                if ($attempt -eq 4) { Write-Host ('Installer control: '+$name+' | type='+$control.Current.ControlType.ProgrammaticName+' | hwnd='+$control.Current.NativeWindowHandle+' | enabled='+$control.Current.IsEnabled+' | offscreen='+$control.Current.IsOffscreen) }
+                if ($name -eq 'I accept the agreement' -and $control.Current.IsEnabled) {
                     Click-InstallerControl $control
                 }
             }
             foreach ($control in $controls) {
                 $name = ([string]$control.Current.Name).Replace('&','').Trim()
-                if ($name -match '^(Next\s*>?|Install|Finish)$' -and $control.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $control.Current.IsEnabled -and !$control.Current.IsOffscreen) {
+                if ($name -match '^(Next\s*>?|Install|Finish)$' -and $control.Current.IsEnabled) {
                     if ($name -eq 'Finish') { $finished = $true }
                     Write-Host ('Installer action: '+$name); Click-InstallerControl $control; break
                 }
