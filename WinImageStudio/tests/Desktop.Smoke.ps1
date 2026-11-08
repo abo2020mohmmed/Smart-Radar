@@ -39,6 +39,8 @@ function Wait-Control([string]$id) {
         try { $control = Find-Control $id; if (!$control.Current.IsOffscreen) { return $control } } catch { }
         Start-Sleep -Milliseconds 500
     }
+    $all = $script:window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    foreach ($item in $all) { Write-Output ("UI " + $item.Current.AutomationId + " | " + $item.Current.Name + " | offscreen=" + $item.Current.IsOffscreen) }
     throw "Visible control did not appear: $id"
 }
 function Invoke-Primary {
@@ -58,6 +60,7 @@ function Dism-Run([string[]]$parameters) {
 }
 try {
     Start-Ui
+    $null = Wait-Control 'SourceBox'
     foreach ($id in @('Step1','Step2','Step3','Step4','Step5','NextButton','BackButton','StrongMode','ManualMode','SourceBox')) {
         $control = Find-Control $id
         if ($control.Current.Name.Contains([string][char]0x2713)) { throw "False initial completion: $id" }

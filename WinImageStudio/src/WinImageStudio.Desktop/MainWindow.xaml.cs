@@ -38,6 +38,7 @@ public partial class MainWindow : Window
         RegistryTypeBox.ItemsSource = Enum.GetValues<ValueKind>(); RegistryTypeBox.SelectedIndex = 0;
         PlanGrid.ItemsSource = plan;
         engine = NewEngine();
+        EditorTabs.SelectedItem = SourceTab;
         initialized = true;
         plan.CollectionChanged += (_, _) =>
         {
