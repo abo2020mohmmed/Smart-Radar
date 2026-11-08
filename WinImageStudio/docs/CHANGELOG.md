@@ -1,5 +1,13 @@
 # Changes
 
+## 0.6.0
+
+- Add an Arabic/English single-EXE installer with desktop/Start menu shortcuts, upgrade support and tracked-file uninstall. Projects, ISO files, reports and shared Microsoft ADK are outside uninstall deletion; unknown user-created files are preserved even inside the application directory.
+- Include the exact user-supplied adksetup.exe (2,233,776 bytes, SHA-256 ac6a930fdb5c2980ba5fefe606d47edaafcf5f647b4337411500d158ea77300f). Verify the pinned bytes and valid Microsoft Authenticode before execution. The bootstrapper may still download deployment payloads.
+- Installer optionally invokes a headless ADK helper to provision only Deployment Tools, detects existing tools and reports dependency failures separately. No Windows image is modified by installing this desktop application.
+- Add a named application mutex to block duplicate editor instances and updates while the current editor is open.
+- Add native install/upgrade/uninstall, installed-app UI/WIM workflow, prerequisite tamper refusal and user-data/shared-ADK preservation checks. Publish a direct EXE release only after tests pass.
+
 ## 0.5.0
 
 - Freshly export the final single-index installation payload before ISO creation: recovery-compressed install.esd by default, or a fresh max-compressed install.wim. This reclaims unreferenced WIM data and avoids always replacing a source ESD with a larger working WIM. No fixed reduction percentage is promised. Original ISO/working WIM remain intact; old install payload alternatives are excluded from the media.

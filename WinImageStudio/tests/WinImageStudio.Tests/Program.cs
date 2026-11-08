@@ -21,9 +21,9 @@ if (args.Contains("--adk-install", StringComparer.Ordinal))
             Console.WriteLine("PASS ADK signature check refuses unsigned executables");
         }
         finally { File.Delete(unsigned); }
-        var installer = new AdkInstaller(new ProcessRunner(Console.WriteLine), ps, verify);
+        var installer = new AdkInstaller(new ProcessRunner(Console.WriteLine), ps, verify, Path.GetFullPath("installer/prerequisites/adksetup.exe"));
         var installed = await installer.EnsureInstalledAsync(CancellationToken.None, verifyDownloadEvenIfInstalled: true);
-        Console.WriteLine("PASS Microsoft ADK download/signature, Deployment Tools readiness and oscdimg discovery: " + installed.Path);
+        Console.WriteLine("PASS Supplied ADK bytes/hash/signature, Deployment Tools readiness and oscdimg discovery: " + installed.Path);
         return 0;
     }
     catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
@@ -49,6 +49,13 @@ try
         Equal(true, DismCommands.ExportFinal("source", "final.esd", true).Contains("/Compress:recovery"));
         Equal(true, DismCommands.ExportFinal("source", "final.wim", false).Contains("/Compress:max"));
         Equal(true, DismCommands.ExportFinal("source", "final.esd", true).Contains("/CheckIntegrity"));
+    }));
+    await Test("Bundled ADK rejects changed content before execution", () => Sync(() =>
+    {
+        using var wrongSize = new MemoryStream([1, 2, 3]);
+        Throws<InvalidDataException>(() => AdkInstaller.ValidateBundledBytes(wrongSize));
+        using var wrongContent = new MemoryStream(new byte[AdkInstaller.BundledSize]);
+        Throws<InvalidDataException>(() => AdkInstaller.ValidateBundledBytes(wrongContent));
     }));
     await Test("ADK permits only exact Microsoft HTTPS download hosts", () => Sync(() =>
     {

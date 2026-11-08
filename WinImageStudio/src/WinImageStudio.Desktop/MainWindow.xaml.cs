@@ -260,9 +260,9 @@ public partial class MainWindow : Window
         if (summary is not null) BuildSizeBox.Text = $"الضغط: {summary.Compression} | ISO الجديد: {summary.OutputIsoBytes / 1073741824.0:F2} GiB" + (summary.SourceIsoBytes is long sourceBytes ? $" | الأصلي: {sourceBytes / 1073741824.0:F2} GiB" : "") + "\nالحجم لا يثبت اكتمال إزالة البرامج؛ استخدم تقرير الفحص.";
         EditorTabs.SelectedItem = DoneTab;
     });
-    private async void InstallAdk(object sender, RoutedEventArgs e) => await RunAsync("تنزيل ADK الرسمي والتحقق من توقيعه وتثبيت Deployment Tools…", async token =>
+    private async void InstallAdk(object sender, RoutedEventArgs e) => await RunAsync("التحقق من مثبت ADK المرفق وتجهيز Deployment Tools…", async token =>
     {
-        var installer = new AdkInstaller(new ProcessRunner(Log), ToolSettings.WindowsDefaults().PowerShell, Path.Combine(AppContext.BaseDirectory, "Scripts", "VerifyAdk.ps1"));
+        var installer = new AdkInstaller(new ProcessRunner(Log), ToolSettings.WindowsDefaults().PowerShell, Path.Combine(AppContext.BaseDirectory, "Scripts", "VerifyAdk.ps1"), Path.Combine(AppContext.BaseDirectory, "Prerequisites", "adksetup.exe"));
         var result = await installer.EnsureInstalledAsync(token);
         OscdimgBox.Text = result.Path;
         AdkStatus.Text = result.RebootRequired ? "✓ اكتمل إعداد الأداة. طلب المثبت إعادة تشغيل الجهاز؛ احفظ المشروع وأعد التشغيل قبل البناء إذا لزم." : "✓ أداة ISO جاهزة ومحددة تلقائيًا. يمكنك الآن الضغط على التالي.";

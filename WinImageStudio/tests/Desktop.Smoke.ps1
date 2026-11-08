@@ -1,7 +1,8 @@
+param([string]$ApplicationPath)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
-$app = Join-Path $PSScriptRoot '../artifacts/win-x64/WinImageStudio.exe'
+$app = if ($ApplicationPath) { $ApplicationPath } else { Join-Path $PSScriptRoot '../artifacts/win-x64/WinImageStudio.exe' }
 $process = $null
 $window = $null
 function Start-Ui([string]$projectFolder = '') {

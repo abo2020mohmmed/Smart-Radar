@@ -1,13 +1,23 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Runtime.Versioning;
 using Microsoft.Win32;
 
 namespace WinImageStudio.Core;
 
 [SupportedOSPlatform("windows")]
-public sealed class AdkInstaller(ICommandRunner runner, string powerShell, string verificationScript)
+public sealed class AdkInstaller(ICommandRunner runner, string powerShell, string verificationScript, string? bundledInstaller = null)
 {
     // Microsoft Learn ADK 10.1.26100.9457 (September 2026), compatible with Windows 10/11.
+    public const string BundledSha256 = "AC6A930FDB5C2980BA5FEFE606D47EDAAFCF5F647B4337411500D158EA77300F";
+    public const long BundledSize = 2233776;
+    public static void ValidateBundledBytes(Stream source)
+    {
+        if (!source.CanSeek || source.Length != BundledSize) throw new InvalidDataException("The bundled ADK setup does not match the supplied file size.");
+        source.Position = 0;
+        string hash = Convert.ToHexString(SHA256.HashData(source)); source.Position = 0;
+        if (!hash.Equals(BundledSha256, StringComparison.Ordinal)) throw new InvalidDataException("The bundled ADK setup hash does not match the supplied file. Installation was refused.");
+    }
     public static Uri DownloadUri { get; } = new("https://go.microsoft.com/fwlink/?linkid=2289980");
     public static bool TrustedDownload(Uri uri) => uri.Scheme == Uri.UriSchemeHttps && uri.Port == 443 && string.IsNullOrEmpty(uri.UserInfo) &&
         (uri.Host.Equals("go.microsoft.com", StringComparison.OrdinalIgnoreCase) || uri.Host.Equals("download.microsoft.com", StringComparison.OrdinalIgnoreCase));
@@ -36,6 +46,14 @@ public sealed class AdkInstaller(ICommandRunner runner, string powerShell, strin
         string setup = Path.Combine(folder, "adksetup.exe");
         try
         {
+            if (bundledInstaller is not null)
+            {
+                string original = Validation.ExistingFile(bundledInstaller, ".exe"); Validation.RejectReparseAncestors(original);
+                await using var input = new FileStream(original, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
+                await using var output = new FileStream(setup, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true);
+                await input.CopyToAsync(output, token).ConfigureAwait(false);
+            }
+            else
             using (var handler = new HttpClientHandler { AllowAutoRedirect = false })
             using (var http = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(5) })
             {
@@ -67,6 +85,7 @@ public sealed class AdkInstaller(ICommandRunner runner, string powerShell, strin
             Validation.RejectReparse(setup);
             // Keep the downloaded executable locked against modification/deletion during verification and execution.
             using var locked = File.Open(setup, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (bundledInstaller is not null) ValidateBundledBytes(locked);
             (await runner.RunAsync(powerShell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Validation.ExistingFile(verificationScript, ".ps1"), "-Installer", setup], token).ConfigureAwait(false)).EnsureSuccess("Verify Microsoft ADK Authenticode signature");
             if (existing is not null) return (existing, false);
             var installed = await runner.RunAsync(setup, ["/quiet", "/norestart", "/ceip", "off", "/features", "OptionId.DeploymentTools"], token).ConfigureAwait(false);

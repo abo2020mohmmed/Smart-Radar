@@ -1,0 +1,11 @@
+Microsoft Windows ADK bootstrapper supplied by the user.
+Filename: adksetup.exe
+Bytes: 2233776
+SHA-256: ac6a930fdb5c2980ba5fefe606d47edaafcf5f647b4337411500d158ea77300f
+Git blob: 411ae1976283e73fe0633dc58fe896d640e19b93
+
+This Microsoft component is not licensed under this project's MIT license. Microsoft terms apply.
+Official information: https://learn.microsoft.com/windows-hardware/get-started/adk-install
+The bootstrapper may download additional Microsoft payloads. Only Deployment Tools is requested.
+Hash and Microsoft Authenticode are checked before execution. Shared ADK components are not removed by WinImageStudio's uninstaller.
+Installer engine: Inno Setup, https://jrsoftware.org/isinfo.php. Installer engines are subject to the Inno Setup license; the compiler's license is included in the build output notices.
