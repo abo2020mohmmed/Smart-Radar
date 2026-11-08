@@ -1,5 +1,13 @@
 # Changes
 
+## 0.4.0
+
+- Replace the duplicated navigation/tab interface with one page per phase and a fixed primary action footer. Next now creates/imports, prepares/analyzes, queues a review, applies with explicit consent, commits, and builds ISO according to the current phase. In particular, Next after application executes commit rather than navigating to the same review tab.
+- Keep manual feature/package/driver/app/service, integration and registry controls inside the customization page; keep output filename and oscdimg together on the output page. Fold detailed logs and optional controls by default.
+- Automatically analyze the strong preset after mounting. Changed options require a fresh visible analysis before review; never apply on analysis or navigation alone.
+- Restore existing project progress directly to the correct wizard page. Support --project <folder> for opening a validated project journal. Recovery remains explicit and project-scoped; saving never discards changes.
+- Add pure primary-action transition tests and a desktop regression that launches the actual app with a tiny mounted WIM fixture, invokes Next, verifies native commit/journal completion and output navigation, then explicitly finishes WIM-only output without inventing an ISO.
+
 ## 0.3.1
 
 - Fix the strong-path empty-plan button rejecting a session whose plan already applied successfully and whose old analysis was correctly invalidated. The review gate is now idempotent after confirmed application, never inferred from an empty queue alone.

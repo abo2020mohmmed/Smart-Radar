@@ -44,6 +44,13 @@ public partial class MainWindow : Window
             WorkflowRules.PendingPlanChanged(project, previousPlanCount, plan.Count);
             previousPlanCount = plan.Count; RefreshJourney();
         };
+        ImagesBox.SelectionChanged += (_, _) => { if (initialized) RefreshJourney(); };
+        EditorTabs.SelectionChanged += (_, args) => { if (args.Source == EditorTabs) RefreshJourney(); };
+        Loaded += async (_, _) =>
+        {
+            string[] args = Environment.GetCommandLineArgs();
+            if (args.Length == 3 && args[1] == "--project") await OpenProjectAsync(args[2]);
+        };
         RefreshJourney();
     }
     protected override void OnSourceInitialized(EventArgs e)
@@ -113,10 +120,10 @@ public partial class MainWindow : Window
     private void BrowseOscdimg(object sender, RoutedEventArgs e) { if (PickFile("oscdimg|oscdimg.exe") is { } file) OscdimgBox.Text = file; }
     private void BrowseWimlib(object sender, RoutedEventArgs e) { if (PickFile("wimlib-imagex|wimlib-imagex.exe") is { } file) WimlibBox.Text = file; }
     private void BrowseInstaller(object sender, RoutedEventArgs e) { if (PickFile("Installer|*.exe;*.msi") is { } file) InstallerBox.Text = file; }
-    private async void ApplyTools(object sender, RoutedEventArgs e) => await RunAsync("اعتماد الأدوات", _ => { var replacement = NewEngine(); engine.Dispose(); engine = replacement; return Task.CompletedTask; });
-    private async void CreateProject(object sender, RoutedEventArgs e) => await RunAsync("إنشاء مشروع واستيراد المصدر", async token =>
+    private Task CreateProjectAsync() => RunAsync("إنشاء مشروع واستيراد المصدر", async token =>
     {
         if (project?.State is ImageState.Mounted or ImageState.RecoveryRequired) throw new InvalidOperationException("ألغِ تركيب المشروع الحالي أو استعده قبل فتح مشروع آخر.");
+        ReplaceEngine();
         project = await engine.CreateAsync(SourceBox.Text, WorkspaceBox.Text, token);
         plan.Clear(); ResetStrong(); project.WorkflowMode = StrongMode.IsChecked == true ? "Strong" : "Manual";
         ImagesBox.ItemsSource = await engine.InspectAsync(project, token); SelectPro(); project.WorkflowStage = 1;
@@ -125,13 +132,17 @@ public partial class MainWindow : Window
     private async void OpenProject(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog(); if (dialog.ShowDialog(this) != true) return;
-        await RunAsync("فتح المشروع", async token =>
+        await OpenProjectAsync(dialog.FolderName);
+    }
+    private Task OpenProjectAsync(string folder) => RunAsync("فتح المشروع", async token =>
         {
             if (project?.State is ImageState.Mounted or ImageState.RecoveryRequired) throw new InvalidOperationException("ألغِ تركيب المشروع الحالي أو استعده أولًا.");
-            var loaded = await store.LoadAsync(dialog.FolderName, token);
+            var loaded = await store.LoadAsync(folder, token);
             plan.Clear(); project = loaded; ResetStrong();
             StrongMode.IsChecked = project.WorkflowMode != "Manual"; ManualMode.IsChecked = project.WorkflowMode == "Manual";
             ImagesBox.ItemsSource = project.Image is null ? await engine.InspectAsync(project, token) : new[] { project.Image };
+            SourceBox.Text = project.Source; WorkspaceBox.Text = Path.GetDirectoryName(project.Root)!;
+            OutputFileBox.Text = project.OutputIso ?? Path.Combine(project.Root, "Windows-Custom.iso");
             SelectPro();
             if (project.WorkflowStage == 0) project.WorkflowStage = project.State == ImageState.Committed ? 4 : project.State == ImageState.Mounted ? 2 : 1;
             if (project.WorkflowStage >= 3)
@@ -146,14 +157,8 @@ public partial class MainWindow : Window
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log("تعذر قراءة التقرير السابق: " + ex.Message); }
                 EditorTabs.SelectedItem = project.State == ImageState.Mounted ? ReviewTab : OutputTab;
             }
+            ResumePage();
         });
-    }
-    private async void ImportImage(object sender, RoutedEventArgs e) => await RunAsync("نسخ الإصدار المختار", async token =>
-    {
-        var image = ImagesBox.SelectedItem as ImageInfo ?? throw new InvalidOperationException("اختر إصدارًا من القائمة.");
-        await engine.ImportAsync(Session(), image, token);
-    });
-    private async void MountImage(object sender, RoutedEventArgs e) => await RunAsync("تركيب صورة المشروع", token => engine.MountAsync(Session(), token));
     private async void ReadInventory(object sender, RoutedEventArgs e) => await RunAsync("قراءة مكونات الصورة", async token =>
     {
         var inventory = await engine.InventoryAsync(Session(), token);
@@ -209,7 +214,7 @@ public partial class MainWindow : Window
             plan.Clear(); foreach (var operation in data) plan.Add(operation); AcknowledgeBox.IsChecked = false;
         });
     }
-    private async void ApplyPlan(object sender, RoutedEventArgs e) => await RunAsync("تطبيق الخطة", async token =>
+    private Task ApplyPlanAsync() => RunAsync("تطبيق الخطة", async token =>
     {
         if (AcknowledgeBox.IsChecked != true) throw new InvalidOperationException("راجع الخطة وحدد مربع الإقرار قبل تطبيقها.");
         var snapshot = plan.ToArray(); if (snapshot.Length == 0) throw new InvalidOperationException("الخطة فارغة.");
@@ -222,13 +227,13 @@ public partial class MainWindow : Window
             StrongStatus.Text = "نتيجة التطبيق — راجع العناصر التي بقيت:" + Environment.NewLine + string.Join(Environment.NewLine, engine.OperationNotices);
             foreach (string notice in engine.OperationNotices) Log(notice);
             ReviewResultBox.Text += Environment.NewLine + StrongStatus.Text;
-            MessageBox.Show(this, ReviewResultBox.Text, "تقرير التخفيف — الخطوة التالية حفظ الصورة", MessageBoxButton.OK, MessageBoxImage.Information);
+
         }
     });
-    private async void CommitImage(object sender, RoutedEventArgs e) => await RunAsync("حفظ الصورة وإلغاء التركيب", async token =>
+    private Task CommitImageAsync() => RunAsync("حفظ الصورة وإلغاء التركيب", async token =>
     {
         if (!WorkflowRules.CanCommit(Session(), plan.Count)) throw new InvalidOperationException("طبّق الخطة أولًا، أو اختر المتابعة دون تعديلات بعد مراجعتها.");
-        await engine.UnmountAsync(Session(), true, token); Session().WorkflowStage = 4; EditorTabs.SelectedItem = OutputTab;
+        await engine.UnmountAsync(Session(), true, token); Session().WorkflowStage = 4; SetDefaultOutput(); EditorTabs.SelectedItem = OutputTab;
     });
     private async void DiscardImage(object sender, RoutedEventArgs e)
     {
@@ -240,10 +245,21 @@ public partial class MainWindow : Window
         if (MessageBox.Show(this, "ستُستعاد جلسة هذا المشروع فقط وتُتجاهل تعديلات التركيب غير المحفوظة. المتابعة؟", "Recovery", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         await RunAsync("استعادة جلسة المشروع", async token => { await engine.RecoverDiscardAsync(Session(), token); ResetAfterDiscard(); });
     }
-    private async void BuildIso(object sender, RoutedEventArgs e)
+    private void BrowseOutput(object sender, RoutedEventArgs e)
     {
-        var dialog = new SaveFileDialog { Filter = "ISO image|*.iso", FileName = "Windows-Custom.iso", OverwritePrompt = true }; if (dialog.ShowDialog(this) != true) return;
-        await RunAsync("بناء ISO قابل للإقلاع", async token => { await engine.BuildIsoAsync(Session(), dialog.FileName, token); Session().WorkflowStage = 5; Session().OutputIso = dialog.FileName; });
+        var dialog = new SaveFileDialog { Filter = "ISO image|*.iso", FileName = "Windows-Custom.iso", OverwritePrompt = true };
+        if (dialog.ShowDialog(this) == true) OutputFileBox.Text = dialog.FileName;
+    }
+    private Task BuildIsoAsync() => RunAsync("إنشاء ISO قابل للإقلاع", async token =>
+    {
+        ReplaceEngine();
+        await engine.BuildIsoAsync(Session(), OutputFileBox.Text, token);
+        Session().WorkflowStage = 5; Session().OutputIso = Path.GetFullPath(OutputFileBox.Text); EditorTabs.SelectedItem = DoneTab;
+    });
+    private void ReplaceEngine() { var replacement = NewEngine(); engine.Dispose(); engine = replacement; }
+    private void SetDefaultOutput()
+    {
+        if (project is not null && string.IsNullOrWhiteSpace(OutputFileBox.Text)) OutputFileBox.Text = Path.Combine(project.Root, "Windows-Custom.iso");
     }
     private void ResetStrong()
     {
@@ -252,7 +268,11 @@ public partial class MainWindow : Window
         StrongStatus.Text = "ركّب صورة Pro ثم حلّلها. المتجر والطباعة محفوظان في التخفيف التلقائي.";
         FeaturesGrid.ItemsSource = null; PackagesGrid.ItemsSource = null; DriversGrid.ItemsSource = null; AppsGrid.ItemsSource = null; ServicesGrid.ItemsSource = null;
     }
-    private async void AnalyzeStrong(object sender, RoutedEventArgs e) => await RunAsync("تحليل التخفيف القوي لصورة Pro", async token =>
+    private Task AnalyzeStrongAsync() => RunAsync("تحليل التخفيف القوي لصورة Pro", async token =>
+    {
+        ShowCustomization(); await AnalyzeStrongCoreAsync(token);
+    });
+    private async Task AnalyzeStrongCoreAsync(CancellationToken token)
     {
         strongReport = null; strongProjectId = null; StrongPreview.ItemsSource = null;
         var options = new AggressiveOptions(StrongDefenderBox.IsChecked == true, StrongLanguagesBox.IsChecked == true);
@@ -262,8 +282,8 @@ public partial class MainWindow : Window
         StrongStatus.Text = "الإصدار: " + report.Profile.EditionId + " | Build " + report.Profile.Build + Environment.NewLine +
             "عدد الخطوات المقترحة: " + report.Operations.Count + Environment.NewLine +
             string.Join(Environment.NewLine, report.Notes.Select(n => "• " + n));
-    });
-    private async void QueueStrong(object sender, RoutedEventArgs e) => await RunAsync("إضافة التخفيف للخطة القابلة للمراجعة", _ =>
+    }
+    private Task QueueStrongAsync() => RunAsync("إضافة التخفيف للخطة القابلة للمراجعة", _ =>
     {
         if (strongReport is null || strongProjectId != Session().Id) throw new InvalidOperationException("حلّل صورة المشروع الحالي أولًا.");
         if (strongReport.Options != new AggressiveOptions(StrongDefenderBox.IsChecked == true, StrongLanguagesBox.IsChecked == true)) throw new InvalidOperationException("تغيّرت خيارات التخفيف؛ أعد التحليل أولًا.");
@@ -280,7 +300,7 @@ public partial class MainWindow : Window
     {
         public void Report(PlannedOperation value) => report(value);
     }
-    private async void ApproveNoChanges(object sender, RoutedEventArgs e) => await RunAsync("مراجعة صورة دون تعديلات", _ =>
+    private Task ApproveNoChangesAsync() => RunAsync("مراجعة صورة دون تعديلات", _ =>
     {
         if (!WorkflowRules.CanApproveNoChanges(Session(), plan.Count, StrongMode.IsChecked == true, strongReport, strongProjectId,
             new AggressiveOptions(StrongDefenderBox.IsChecked == true, StrongLanguagesBox.IsChecked == true)))
@@ -298,7 +318,7 @@ public partial class MainWindow : Window
     {
         plan.Clear(); ResetStrong(); Session().WorkflowStage = 1; Session().OutputIso = null; EditorTabs.SelectedItem = PrepareTab;
     }
-    private async void PrepareImage(object sender, RoutedEventArgs e) => await RunAsync("نسخ الإصدار وتركيب الصورة", async token =>
+    private Task PrepareImageAsync() => RunAsync("نسخ الإصدار وتركيب الصورة", async token =>
     {
         var session = Session();
         if (session.State == ImageState.RecoveryRequired) throw new InvalidOperationException("استعد الجلسة المتعثرة أولًا من زر الاستعادة.");
@@ -309,35 +329,98 @@ public partial class MainWindow : Window
         if (!File.Exists(session.WorkingWim)) await engine.ImportAsync(session, image, token);
         if (session.State != ImageState.Mounted) await engine.MountAsync(session, token);
         session.WorkflowStage = 2; session.OutputIso = null;
-        EditorTabs.SelectedItem = StrongMode.IsChecked == true ? StrongTab : ComponentsTab;
+        ShowCustomization();
+        if (StrongMode.IsChecked == true) await AnalyzeStrongCoreAsync(token);
+        else
+        {
+            var inventory = await engine.InventoryAsync(session, token);
+            FeaturesGrid.ItemsSource = inventory.Features; PackagesGrid.ItemsSource = inventory.Packages; DriversGrid.ItemsSource = inventory.Drivers; AppsGrid.ItemsSource = inventory.Apps; ServicesGrid.ItemsSource = inventory.Services;
+        }
     });
     private void ModeChanged(object sender, RoutedEventArgs e)
     {
         if (!initialized) return;
         if (project is not null) project.WorkflowMode = StrongMode.IsChecked == true ? "Strong" : "Manual";
         RefreshJourney();
-        if (EditorTabs.SelectedItem is TabItem selected && selected.Visibility != Visibility.Visible)
-            EditorTabs.SelectedItem = StrongMode.IsChecked == true ? StrongTab : ComponentsTab;
+        if (CurrentPage == WizardPage.Customize) ShowCustomization();
     }
     private void ClearPlan(object sender, RoutedEventArgs e)
     {
         if (busy) return;
         plan.Clear(); AcknowledgeBox.IsChecked = false; ResetStrong(); RefreshJourney();
     }
-    private void GoStep(object sender, RoutedEventArgs e)
+    private WizardPage CurrentPage => EditorTabs.SelectedItem == SourceTab ? WizardPage.Source : EditorTabs.SelectedItem == PrepareTab ? WizardPage.Prepare :
+        EditorTabs.SelectedItem == CustomizeTab ? WizardPage.Customize : EditorTabs.SelectedItem == ReviewTab ? WizardPage.Review : EditorTabs.SelectedItem == OutputTab ? WizardPage.Output : WizardPage.Done;
+    private bool AnalysisReady => strongReport is not null && strongProjectId == project?.Id && strongReport.Options == CurrentOptions;
+    private AggressiveOptions CurrentOptions => new(StrongDefenderBox.IsChecked == true, StrongLanguagesBox.IsChecked == true);
+    private WizardDecision Decision => WizardFlow.Next(CurrentPage, project, plan.Count, StrongMode.IsChecked == true, AnalysisReady,
+        WorkflowRules.CanApproveNoChanges(project, plan.Count, StrongMode.IsChecked == true, strongReport, strongProjectId, CurrentOptions),
+        AcknowledgeBox.IsChecked == true, File.Exists(SourceBox.Text) && !string.IsNullOrWhiteSpace(WorkspaceBox.Text),
+        File.Exists(OscdimgBox.Text) && !string.IsNullOrWhiteSpace(OutputFileBox.Text));
+    private void ShowCustomization()
     {
-        if (busy || sender is not Button button || !int.TryParse(button.Tag?.ToString(), out int step)) return;
-        EditorTabs.SelectedItem = step switch { 1 => SourceTab, 2 => PrepareTab, 3 => StrongMode.IsChecked == true ? StrongTab : ComponentsTab, 4 => ReviewTab, _ => OutputTab };
+        EditorTabs.SelectedItem = CustomizeTab;
+        CustomTabs.SelectedItem = StrongMode.IsChecked == true ? StrongTab : ComponentsTab;
     }
-    private void NextStep(object sender, RoutedEventArgs e)
+    private void ResumePage()
     {
-        int stage = project?.WorkflowStage ?? 0;
-        if (project?.State == ImageState.RecoveryRequired) { EditorTabs.SelectedItem = PrepareTab; return; }
-        if (stage == 0) EditorTabs.SelectedItem = SourceTab;
-        else if (stage == 1) EditorTabs.SelectedItem = PrepareTab;
-        else if (stage == 2) EditorTabs.SelectedItem = plan.Count > 0 ? ReviewTab : StrongMode.IsChecked == true ? StrongTab : ComponentsTab;
-        else if (stage == 3) EditorTabs.SelectedItem = ReviewTab;
-        else EditorTabs.SelectedItem = OutputTab;
+        SetDefaultOutput();
+        if (project?.State == ImageState.RecoveryRequired) EditorTabs.SelectedItem = PrepareTab;
+        else if (project?.WorkflowStage == 5 && File.Exists(project.OutputIso)) EditorTabs.SelectedItem = DoneTab;
+        else if (project?.State == ImageState.Committed) EditorTabs.SelectedItem = OutputTab;
+        else if (project?.State == ImageState.Mounted && project.WorkflowStage >= 3) EditorTabs.SelectedItem = ReviewTab;
+        else if (project?.State == ImageState.Mounted) ShowCustomization();
+        else EditorTabs.SelectedItem = PrepareTab;
+    }
+    private async void NextStep(object sender, RoutedEventArgs e)
+    {
+        if (busy || !Decision.Enabled) return;
+        switch (Decision.Action)
+        {
+            case WizardAction.Create: await CreateProjectAsync(); break;
+            case WizardAction.Resume: ResumePage(); break;
+            case WizardAction.Prepare: await PrepareImageAsync(); break;
+            case WizardAction.Analyze: await AnalyzeStrongAsync(); break;
+            case WizardAction.Review:
+                if (StrongMode.IsChecked == true) await QueueStrongAsync();
+                else EditorTabs.SelectedItem = ReviewTab;
+                break;
+            case WizardAction.Apply: await ApplyPlanAsync(); break;
+            case WizardAction.Approve: await ApproveNoChangesAsync(); break;
+            case WizardAction.Commit: await CommitImageAsync(); break;
+            case WizardAction.BuildIso: await BuildIsoAsync(); break;
+            case WizardAction.Finish: EditorTabs.SelectedItem = DoneTab; break;
+            case WizardAction.OpenFolder:
+                await RunAsync("فتح مجلد النتيجة", token =>
+                {
+                    string file = Session().OutputIso ?? Session().WorkingWim;
+                    var start = new System.Diagnostics.ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe")) { UseShellExecute = true };
+                    start.ArgumentList.Add(Path.GetDirectoryName(file)!); _ = System.Diagnostics.Process.Start(start);
+                    return Task.CompletedTask;
+                }); break;
+        }
+        RefreshJourney();
+    }
+    private void PreviousStep(object sender, RoutedEventArgs e)
+    {
+        if (busy || (project?.WorkflowStage ?? 0) >= 3) return;
+        if (CurrentPage == WizardPage.Review) ShowCustomization();
+        else if (CurrentPage == WizardPage.Customize) EditorTabs.SelectedItem = PrepareTab;
+        else if (CurrentPage == WizardPage.Prepare) EditorTabs.SelectedItem = SourceTab;
+        RefreshJourney();
+    }
+    private void NewProject(object sender, RoutedEventArgs e)
+    {
+        if (busy || project?.State is ImageState.Mounted or ImageState.RecoveryRequired) return;
+        project = null; plan.Clear(); ResetStrong(); ImagesBox.ItemsSource = null; SourceBox.Text = ""; OutputFileBox.Text = "";
+        EditorTabs.SelectedItem = SourceTab; RefreshJourney();
+    }
+    private void WizardInputChanged(object sender, RoutedEventArgs e) { if (initialized) RefreshJourney(); }
+    private void StrongOptionsChanged(object sender, RoutedEventArgs e)
+    {
+        if (!initialized) return;
+        if (!AnalysisReady) { StrongPreview.ItemsSource = null; StrongStatus.Text = "تغيرت الخيارات. اضغط التالي لإعادة التحليل قبل مراجعة الخطة."; }
+        RefreshJourney();
     }
     private void RefreshJourney()
     {
@@ -345,44 +428,44 @@ public partial class MainWindow : Window
         bool strong = StrongMode.IsChecked == true;
         ComponentsTab.Visibility = IntegrationTab.Visibility = RegistryTab.Visibility = strong ? Visibility.Collapsed : Visibility.Visible;
         StrongTab.Visibility = strong ? Visibility.Visible : Visibility.Collapsed;
-        StrongMode.IsEnabled = ManualMode.IsEnabled = !busy && plan.Count == 0;
-        NextButton.IsEnabled = !busy;
-        int stage = project?.WorkflowStage ?? 0;
+        StrongMode.IsEnabled = ManualMode.IsEnabled = !busy && plan.Count == 0 && (project?.WorkflowStage ?? 0) < 3;
+        OpenProjectButton.IsEnabled = !busy && project?.State is not (ImageState.Mounted or ImageState.RecoveryRequired);
         bool recovery = project?.State == ImageState.RecoveryRequired;
-        Button[] buttons = [Step1, Step2, Step3, Step4, Step5];
-        string[] titles = ["① المصدر", "② اختيار Pro وتركيبه", "③ التعديلات", "④ التطبيق والحفظ", "⑤ إنشاء ISO"];
-        for (int i = 0; i < buttons.Length; i++)
-        {
-            // The modifications step completes only after every operation succeeds.
-            bool done = stage >= i + 1 && (!recovery || i == 0) && (i != 4 || File.Exists(project?.OutputIso));
-            buttons[i].Content = (done ? "✓ " : "") + titles[i];
-            buttons[i].IsEnabled = !busy && (i switch
-            {
-                0 => true,
-                1 => project is not null,
-                2 or 3 => project?.State == ImageState.Mounted,
-                _ => project?.State == ImageState.Committed
-            });
-            buttons[i].Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(done ? "#145C48" : "#26364A"));
-        }
-        ApplyPlanButton.Content = (stage >= 3 && !recovery ? "✓ " : "") + "④ أ · تطبيق الخطة";
-        CommitButton.Content = (stage >= 4 && !recovery ? "✓ " : "") + "④ ب · حفظ الصورة وإلغاء التركيب";
-        ApplyPlanButton.IsEnabled = !busy && project?.State == ImageState.Mounted && plan.Count > 0;
-        CommitButton.IsEnabled = !busy && WorkflowRules.CanCommit(project, plan.Count);
-        ApproveNoChangesButton.IsEnabled = !busy && project?.State == ImageState.Mounted && plan.Count == 0 && stage < 3;
-        ApproveNoChangesButton.Content = stage >= 3 && !recovery ? "✓ المراجعة مكتملة — احفظ الصورة" : "متابعة دون تعديلات · للخطة الفارغة";
-        NextButton.Content = stage == 3 && !recovery ? "التالي: حفظ الصورة ←" : "التالي ←";
+        if (recovery && EditorTabs.SelectedItem != PrepareTab) { EditorTabs.SelectedItem = PrepareTab; return; }
+        var decision = Decision;
+        NextButton.Content = busy ? "جارٍ التنفيذ…" : decision.Caption;
+        NextButton.IsEnabled = !busy && decision.Enabled && (decision.Action != WizardAction.Prepare || ImagesBox.SelectedItem is not null);
+        BackButton.IsEnabled = !busy && CurrentPage is not (WizardPage.Source or WizardPage.Done) && (project?.WorkflowStage ?? 0) < 3 && !recovery;
+        GuideText.Text = busy ? "تُنفّذ العملية الآن. انتظر اكتمالها قبل الانتقال." : decision.Hint;
+        CancelButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        RecoveryPanel.Visibility = recovery ? Visibility.Visible : Visibility.Collapsed;
         ImagesBox.IsEnabled = !busy && project?.Image is null;
-        BuildIsoButton.IsEnabled = !busy && project?.State == ImageState.Committed && plan.Count == 0;
-        OutputPathBox.Text = project?.OutputIso ?? "لم يُنشأ ملف ISO بعد.";
-        GuideText.Text = recovery ? "توقفت العملية: افتح الخطوة ② لاستعادة جلسة المشروع وتجاهل التعديلات غير المحفوظة، ثم أعد تجهيز الصورة." : stage switch
+        SourceBox.IsReadOnly = WorkspaceBox.IsReadOnly = project is not null;
+        SourceBrowse.IsEnabled = WorkspaceBrowse.IsEnabled = project is null && !busy;
+        AcknowledgeBox.Visibility = project?.WorkflowStage >= 3 ? Visibility.Collapsed : Visibility.Visible;
+        PlanGrid.Visibility = project?.WorkflowStage >= 3 ? Visibility.Collapsed : Visibility.Visible;
+        ReviewResultBox.Visibility = project?.WorkflowStage >= 3 ? Visibility.Visible : Visibility.Collapsed;
+        IsoSettings.Visibility = project?.MediaPath is null ? Visibility.Collapsed : Visibility.Visible;
+        OutputHint.Text = project?.MediaPath is null ? "✓ حُفظت صورة WIM. المصدر لا يحتوي وسائط ISO كاملة، لذلك لن يُنشأ ISO. اضغط إنهاء لعرض مكان الصورة." : "✓ حُفظت الصورة. اختر مكان ISO وحدد أداة oscdimg هنا، ثم اضغط التالي.";
+        OutputPathBox.Text = project?.OutputIso ?? project?.WorkingWim ?? "";
+        TextBlock[] badges = [Step1, Step2, Step3, Step4, Step5];
+        string[] labels = ["① المصدر", "② الإصدار", "③ التعديلات", "④ التطبيق والحفظ", "⑤ الإخراج"];
+        int stage = project?.WorkflowStage ?? 0;
+        for (int i = 0; i < badges.Length; i++)
         {
-            0 => "① اختر ISO وحدد مجلد المشروع ثم اضغط إنشاء المشروع.",
-            1 => "② اختر Windows Pro ثم اضغط تجهيز الإصدار وتركيبه.",
-            2 => plan.Count > 0 ? "④ راجع الخطة وحدد الإقرار، ثم طبّق التعديلات." : strong ? "③ اضغط تحليل الصورة، راجع التقرير، ثم أضف التخفيف إلى الخطة." : "③ اقرأ المكونات وأضف اختياراتك إلى الخطة، ثم افتح الخطوة ④.",
-            3 => "④ نجح التطبيق. راجع التقرير ثم اضغط حفظ الصورة وإلغاء التركيب.",
-            4 => "⑤ حُفظت الصورة. يمكنك الآن إنشاء ISO.",
-            _ => "✓ اكتملت الخطوات وحُفظ ISO في المسار المعروض في الخطوة ⑤."
+            bool done = stage >= i + 1 && (!recovery || i == 0) && (i != 4 || File.Exists(project?.OutputIso));
+            if (i == 4 && CurrentPage == WizardPage.Done && project?.State == ImageState.Committed && project.MediaPath is null && File.Exists(project.WorkingWim)) done = true;
+            badges[i].Text = (done ? "✓ " : "") + labels[i];
+            badges[i].Foreground = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(done ? "#65D6A6" : "#AAB7C8"));
+        }
+        (PageTitle.Text, PageDescription.Text) = CurrentPage switch
+        {
+            WizardPage.Source => ("① اختر المصدر والمسار", "كل مرحلة لها صفحة واحدة. زر التالي أسفل النافذة ينفّذ الإجراء وينقلك للمرحلة التالية."),
+            WizardPage.Prepare => ("② اختر إصدار Windows", "ستُجرى عمليات النسخ والتركيب على نسخة داخل المشروع، مع بقاء المصدر محفوظًا."),
+            WizardPage.Customize => ("③ راجع التعديلات", strong ? "هذه هي التعديلات المقترحة. بعد مراجعتها اضغط التالي." : "اختر تعديلاتك من الأقسام أدناه، ثم اضغط التالي لمراجعة الخطة."),
+            WizardPage.Review => (stage >= 3 ? "④ نجح التطبيق — احفظ الصورة" : "④ وافق على الخطة وطبّقها", stage >= 3 ? "راجع تقرير العناصر المتبقية أدناه. زر التالي يحفظ الصورة فعلًا ويلغي تركيبها." : "لن تُطبّق التعديلات إلا بعد تحديد الموافقة والضغط على التالي."),
+            WizardPage.Output => ("⑤ احفظ النتيجة النهائية", "إعدادات الإخراج كلها في هذه الصفحة."),
+            _ => ("✓ النتيجة جاهزة", "يمكنك الآن فتح مجلد النتيجة واختبار النسخة.")
         };
     }
     private void CancelClick(object sender, RoutedEventArgs e) { cancellation?.Cancel(); CancelButton.IsEnabled = false; StatusLabel.Text = "طُلب التوقف؛ انتظار اكتمال خطوة النظام الحالية."; }
