@@ -17,18 +17,18 @@ public partial class App : Application
         instance = new Mutex(false, "WinImageStudio.Desktop", out bool first);
         if (!first)
         {
-            StartupUri = null;
             if (!installerMode) MessageBox.Show("WinImageStudio يعمل بالفعل. استخدم النافذة المفتوحة لحماية جلسة الصورة الحالية.", "WinImageStudio", MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown(installerMode ? 32 : 0); return;
         }
         if (installerMode)
         {
-            StartupUri = null; ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
             base.OnStartup(e);
             _ = InstallBundledAdkAsync();
             return;
         }
         base.OnStartup(e);
+        MainWindow = new MainWindow(); MainWindow.Show();
     }
     private async Task InstallBundledAdkAsync()
     {

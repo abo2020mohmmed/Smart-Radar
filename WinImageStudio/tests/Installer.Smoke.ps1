@@ -11,7 +11,15 @@ $iso = Join-Path $saved 'User-Windows.iso'
 function Run-Setup([string]$log) {
     $parameters = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/RESTARTEXITCODE=3010',('/DIR="' + $installDir + '"'),'/TASKS="desktopicon,installadk"',('/LOG="' + $log + '"'))
     $process = Start-Process -FilePath $installer -ArgumentList $parameters -PassThru -Wait
-    try { if ($process.ExitCode -notin @(0,3010)) { throw ('Setup failed: ' + $process.ExitCode + "`n" + [IO.File]::ReadAllText($log)) } }
+    try {
+        if ($process.ExitCode -notin @(0,3010)) {
+            $appLog = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'WinImageStudio/crash.log'
+            if (Test-Path -LiteralPath $appLog) { Write-Host ([IO.File]::ReadAllText($appLog)) }
+            $details = [IO.File]::ReadAllText($log)
+            if ($details.Length -gt 8000) { $details = $details.Substring($details.Length - 8000) }
+            throw ('Setup failed: ' + $process.ExitCode + "`n" + $details)
+        }
+    }
     finally { $process.Dispose() }
 }
 function Uninstall-TestApp {
