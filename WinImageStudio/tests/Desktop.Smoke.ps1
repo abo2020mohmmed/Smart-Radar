@@ -40,7 +40,7 @@ function Wait-Control([string]$id) {
         Start-Sleep -Milliseconds 500
     }
     $all = $script:window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-    foreach ($item in $all) { Write-Output ("UI " + $item.Current.AutomationId + " | " + $item.Current.Name + " | offscreen=" + $item.Current.IsOffscreen) }
+    foreach ($item in $all) { Write-Host ("UI " + $item.Current.AutomationId + " | " + $item.Current.Name + " | offscreen=" + $item.Current.IsOffscreen) }
     throw "Visible control did not appear: $id"
 }
 function Invoke-Primary {
