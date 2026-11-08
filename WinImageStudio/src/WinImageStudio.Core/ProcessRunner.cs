@@ -14,6 +14,8 @@ public sealed class ProcessRunner(Action<string>? log = null) : ICommandRunner
             UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
             CreateNoWindow = true, StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
         };
+        if (OperatingSystem.IsWindows() && executable.Equals(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"), StringComparison.OrdinalIgnoreCase))
+            start.Environment["PSModulePath"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "Modules");
         foreach (string arg in arguments) start.ArgumentList.Add(arg);
         using var process = new Process { StartInfo = start };
         SafeLog("Starting " + Path.GetFileName(executable));

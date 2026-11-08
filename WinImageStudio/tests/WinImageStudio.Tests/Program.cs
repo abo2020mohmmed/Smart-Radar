@@ -17,7 +17,7 @@ if (args.Contains("--adk-install", StringComparer.Ordinal))
         {
             await File.WriteAllTextAsync(unsigned, "inert unsigned fixture");
             var refused = await new ProcessRunner().RunAsync(ps, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", verify, "-Installer", unsigned], default);
-            if (refused.ExitCode == 0) throw new Exception("Unsigned installer was accepted");
+            if (refused.ExitCode == 0 || !refused.StandardError.Contains("Invalid ADK signature", StringComparison.Ordinal)) throw new Exception("Unsigned installer verification did not report a signature refusal: " + refused.StandardError);
             Console.WriteLine("PASS ADK signature check refuses unsigned executables");
         }
         finally { File.Delete(unsigned); }

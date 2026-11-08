@@ -1,6 +1,7 @@
 param([Parameter(Mandatory=$true)][string]$Installer)
 $ErrorActionPreference = 'Stop'
 try {
+    Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1') -Force -ErrorAction Stop
     $item = Get-Item -LiteralPath $Installer -Force
     if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Installer must be a regular file.' }
     $signature = Get-AuthenticodeSignature -LiteralPath $item.FullName
