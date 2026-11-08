@@ -31,7 +31,7 @@ try {
         Start-Sleep -Milliseconds 500
         $state=[IO.File]::ReadAllText($journal)|ConvertFrom-Json
         if($state.WorkflowStage -eq 5 -and $state.OutputIso){$iso=$state.OutputIso;$done=$true;break}
-        $errorElement=Find-Ui 'ErrorText';if($errorElement -and !$errorElement.Current.IsOffscreen){throw ('Lite failed: '+$errorElement.Current.Name)}
+        $errorElement=Find-Ui 'ErrorText';if($errorElement -and !$errorElement.Current.IsOffscreen){throw ('Lite failed: '+$errorElement.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value)}
     }
     if(!$done -or !(Test-Path -LiteralPath $iso)){throw 'Lite did not automatically finish the saved fixture.'}
     $disk=Mount-DiskImage -ImagePath $iso -PassThru

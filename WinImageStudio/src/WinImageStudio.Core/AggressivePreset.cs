@@ -94,7 +94,7 @@ public static partial class AggressivePreset
         if (knownBase && !KeepLanguage(profile.BaseLanguage)) notes.Add("لغة الأساس " + profile.BaseLanguage + " ستبقى. لإنشاء صورة بلغتي العربية والإنجليزية فقط، استخدم ISO أساسه إحدى هاتين اللغتين.");
         foreach (string family in new[] { "ar", "en" })
             if (!profile.InstalledLanguages.Any(x => x.Equals(family, StringComparison.OrdinalIgnoreCase) || x.StartsWith(family + "-", StringComparison.OrdinalIgnoreCase)))
-                notes.Add((family == "ar" ? "العربية" : "الإنجليزية") + " غير مثبتة كلغة واجهة بحسب فحص الصورة. الوضع يحافظ على اللغات الموجودة ولا يضيف حزمًا غير متاحة؛ أضف حزمة اللغة الرسمية من قسم الدمج ثم أعد التحليل.");
+                notes.Add((family == "ar" ? "العربية" : "الإنجليزية") + (options.AllowOtherClientEditions ? " غير مثبتة كلغة واجهة في المصدر. Lite يحافظ على الموجود؛ استخدم ISO رسميًا يتضمن اللغة المطلوبة إن احتجتها." : " غير مثبتة كلغة واجهة بحسب فحص الصورة. الوضع يحافظ على اللغات الموجودة ولا يضيف حزمًا غير متاحة؛ أضف حزمة اللغة الرسمية من قسم الدمج ثم أعد التحليل."));
         bool CanPrune(string tag) => pruneLanguages && !string.IsNullOrWhiteSpace(tag) && !KeepLanguage(tag) && !tag.Equals(profile.BaseLanguage, StringComparison.OrdinalIgnoreCase);
         foreach (var app in inventory.Apps)
         {
