@@ -22,9 +22,18 @@ if (Test-Path -LiteralPath $compilerLicense) {
 }
 & $compiler /Qp (Join-Path $PSScriptRoot 'WinImageStudio.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed.' }
-$installer = Join-Path $root 'artifacts/setup/WinImageStudio-Setup-0.6.0-x64.exe'
+$installer = Join-Path $root 'artifacts/setup/WinImageStudio-Setup-0.6.1-x64.exe'
 if (!(Test-Path -LiteralPath $installer)) { throw 'Installer output is missing.' }
-$hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-[IO.File]::WriteAllText((Join-Path $root 'artifacts/setup/SHA256SUMS.txt'), ($hash + '  ' + [IO.Path]::GetFileName($installer) + "`n"))
+$litePayload = Join-Path $root 'artifacts/lite-win-x64'
+$liteAdk = Join-Path $litePayload 'Prerequisites/adksetup.exe'
+if ((Get-FileHash -LiteralPath $liteAdk -Algorithm SHA256).Hash -ne $expected) { throw 'Lite bundled ADK differs from the supplied file.' }
+if (Test-Path -LiteralPath $compilerLicense) { Copy-Item -LiteralPath $compilerLicense -Destination (Join-Path $litePayload 'third-party/InnoSetup-LICENSE.txt') }
+& $compiler /Qp (Join-Path $PSScriptRoot 'WinImageStudio.Lite.iss')
+if ($LASTEXITCODE -ne 0) { throw 'Lite installer compilation failed.' }
+$lines = foreach ($file in Get-ChildItem -LiteralPath (Join-Path $root 'artifacts/setup') -Filter '*.exe') {
+    (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $file.Name
+}
+[IO.File]::WriteAllText((Join-Path $root 'artifacts/setup/SHA256SUMS.txt'), (($lines -join "`n") + "`n"))
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'INSTALL.ar.txt') -Destination (Join-Path $root 'artifacts/setup/INSTALL.ar.txt')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'LITE.ar.txt') -Destination (Join-Path $root 'artifacts/setup/LITE.ar.txt')
 Write-Output ('Installer: ' + $installer)

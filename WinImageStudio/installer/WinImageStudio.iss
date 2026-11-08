@@ -1,4 +1,4 @@
-﻿#define AppVersion "0.6.0"
+﻿#define AppVersion "0.6.1"
 [Setup]
 AppId=WinImageStudio.Desktop
 AppName=WinImageStudio
@@ -41,7 +41,7 @@ Name: "{group}\WinImageStudio"; Filename: "{app}\WinImageStudio.exe"; WorkingDir
 Name: "{autodesktop}\WinImageStudio"; Filename: "{app}\WinImageStudio.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\WinImageStudio.exe"; Description: "فتح WinImageStudio"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\WinImageStudio.exe"; Description: "فتح WinImageStudio"; Flags: nowait postinstall skipifsilent runascurrentuser
 
 [Code]
 var

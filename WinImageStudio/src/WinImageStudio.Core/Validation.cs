@@ -74,7 +74,7 @@ public static partial class Validation
     }
     public static void Operation(PlannedOperation operation)
     {
-        if (operation.PresetId is not null && operation.PresetId != AggressivePreset.Id) throw new ArgumentException("Unknown preset identifier.");
+        if (operation.PresetId is not null && !AggressivePreset.KnownPreset(operation.PresetId)) throw new ArgumentException("Unknown preset identifier.");
         switch (operation.Kind)
         {
             case OperationKind.EnableFeature:

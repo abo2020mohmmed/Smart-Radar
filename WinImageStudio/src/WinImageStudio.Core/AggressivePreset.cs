@@ -7,6 +7,8 @@ namespace WinImageStudio.Core;
 public static partial class AggressivePreset
 {
     public const string Id = "ProLight-v1";
+    public const string LiteId = "ClientLight-v1";
+    public static bool KnownPreset(string? id) => id is Id or LiteId;
     private static readonly HashSet<string> BloatApps = new(StringComparer.OrdinalIgnoreCase)
     {
         "Microsoft.549981C3F5F10", "Microsoft.BingNews", "Microsoft.BingWeather", "Microsoft.BingFinance", "Microsoft.BingSports",
@@ -49,13 +51,23 @@ public static partial class AggressivePreset
         if (profile is null || !profile.EditionId.Equals("Professional", StringComparison.OrdinalIgnoreCase) || !profile.InstallationType.Equals("Client", StringComparison.OrdinalIgnoreCase) || !int.TryParse(profile.Build, NumberStyles.None, CultureInfo.InvariantCulture, out int build) || build < 10240)
             throw new InvalidOperationException("وضع التخفيف القوي يتطلب صورة Windows 10/11 Pro العادية (Professional). لا يُقبل اسم الإصدار الظاهر وحده؛ ركّب الصورة وأعد قراءة مكوناتها.");
     }
+    public static void RequireClient(ImageProfile? profile)
+    {
+        if (profile is null || string.IsNullOrWhiteSpace(profile.EditionId) || profile.EditionId.StartsWith("Mismatch:", StringComparison.OrdinalIgnoreCase) ||
+            !profile.InstallationType.Equals("Client", StringComparison.OrdinalIgnoreCase) ||
+            !int.TryParse(profile.Build, NumberStyles.None, CultureInfo.InvariantCulture, out int build) || build < 10240)
+            throw new InvalidOperationException("Lite يدعم إصدارات Windows 10/11 Client، مثل Home وPro وEducation وEnterprise وLTSC. الصورة الحالية غير مؤكدة التوافق أو لا تتطابق بيانات إصدارها.");
+    }
     public static AggressiveReport Build(Inventory inventory, AggressiveOptions options)
     {
-        RequirePro(inventory.Profile);
+        if (options.AllowOtherClientEditions) RequireClient(inventory.Profile); else RequirePro(inventory.Profile);
+        string presetId = options.AllowOtherClientEditions ? LiteId : Id;
         var profile = inventory.Profile!;
-        if (!inventory.Apps.Any(a => a.Details.Equals("Microsoft.WindowsStore", StringComparison.OrdinalIgnoreCase)))
+        bool hasStore = inventory.Apps.Any(a => a.Details.Equals("Microsoft.WindowsStore", StringComparison.OrdinalIgnoreCase));
+        bool hasPrinting = inventory.Services.Any(s => s.Name.Equals("Spooler", StringComparison.OrdinalIgnoreCase) && s.State is "2" or "3" or "4");
+        if (!options.AllowOtherClientEditions && !hasStore)
             throw new InvalidOperationException("Microsoft Store غير موجود في قائمة تطبيقات هذه الصورة. استخدم مصدر Pro رسميًا يحتوي المتجر قبل تطبيق هذا الوضع.");
-        if (!inventory.Services.Any(s => s.Name.Equals("Spooler", StringComparison.OrdinalIgnoreCase) && s.State is "2" or "3" or "4"))
+        if (!options.AllowOtherClientEditions && !hasPrinting)
             throw new InvalidOperationException("خدمة الطباعة غير موجودة أو حالتها غير معروفة في هذه الصورة. استخدم صورة Pro تحتوي مكونات الطباعة قبل التخفيف.");
         var operations = new List<PlannedOperation>();
         var notes = new List<string>
@@ -64,7 +76,9 @@ public static partial class AggressivePreset
             "إزالة Xbox وGaming Services قد تمنع تشغيل ألعاب تتطلبهما، حتى مع بقاء Microsoft Store.",
             "لا يتضمن هذا الوضع تنزيل برامج من Ghost أو تعديل HPET أو ملف الذاكرة الافتراضية، ولا يضمن زيادة FPS أو مقدارًا محددًا من RAM."
         };
-        void Add(OperationKind kind, string target, string reason, string args = "", RegistryChange? registry = null) => operations.Add(new(kind, target, args, Registry: registry, PresetId: Id, Reason: reason));
+        if (!hasStore) notes.Add("Microsoft Store غير موجود في المصدر أصلًا؛ لم يُحذف ولم يُضف. هذا شائع في بعض إصدارات LTSC.");
+        if (!hasPrinting) notes.Add("خدمة الطباعة غير موجودة/غير مؤكدة في المصدر؛ لا يستطيع التخفيف إضافتها من ملفات غير متاحة. ستبقى مكونات الطباعة المكتشفة محفوظة.");
+        void Add(OperationKind kind, string target, string reason, string args = "", RegistryChange? registry = null) => operations.Add(new(kind, target, args, Registry: registry, PresetId: presetId, Reason: reason));
         foreach (var app in inventory.Apps.OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase))
         {
             if (!app.Removable || app.IsFramework || IsProtectedApp(app.Details)) continue;
@@ -126,21 +140,23 @@ public static partial class AggressivePreset
         if (profile.OneDrivePresent) Add(OperationKind.RemoveOneDrive, "OneDrive", "إزالة ملفات إعداد OneDrive المخصصة ومنع تهيئته للحسابات الجديدة؛ تُبلّغ الملفات المحمية إن تعذر حذفها");
         AddPolicy(@"Policies\Microsoft\Windows\CloudContent", "DisableWindowsConsumerFeatures", "1", "تقليل اقتراحات التطبيقات الاستهلاكية حيث يدعم الإصدار السياسة");
         AddPolicy(@"Policies\Microsoft\Windows\GameDVR", "AllowGameDVR", "0", "إيقاف تسجيل Game DVR في الخلفية");
-        AddPolicy(@"Policies\Microsoft\Windows\DataCollection", "AllowTelemetry", "1", "استخدام المستوى الأساسي الذي تدعمه إصدارات Pro، دون الادعاء بإلغاء كل الاتصالات");
-        AddPolicy(@"Policies\Microsoft\Windows\OneDrive", "DisableFileSyncNGSC", "1", "منع استخدام OneDrive من خلال سياسة Pro");
+        AddPolicy(@"Policies\Microsoft\Windows\DataCollection", "AllowTelemetry", "1", "استخدام المستوى الأساسي حسب دعم إصدار Windows، دون الادعاء بإلغاء كل الاتصالات");
+        AddPolicy(@"Policies\Microsoft\Windows\OneDrive", "DisableFileSyncNGSC", "1", "سياسة منع استخدام OneDrive حيث يدعمها إصدار Windows");
         void AddPolicy(string key, string name, string value, string reason) => Add(OperationKind.SetRegistry, key, reason, registry: new(HiveKind.Software, key, name, ValueKind.DWord, value));
-        return new AggressiveReport(Id, options, profile, operations.DistinctBy(Key).ToArray(), notes);
+        return new AggressiveReport(presetId, options, profile, operations.DistinctBy(Key).ToArray(), notes);
     }
     public static string Key(PlannedOperation operation) => JsonSerializer.Serialize(operation with { Reason = null });
     public static void ValidatePlan(IReadOnlyList<PlannedOperation> operations, Inventory freshInventory)
     {
-        RequirePro(freshInventory.Profile);
-        var canonical = Build(freshInventory, new()).Operations.Select(Key).ToHashSet(StringComparer.Ordinal);
+        bool lite = operations.Any(o => o.PresetId == LiteId);
+        if (lite && operations.Any(o => o.PresetId == Id)) throw new InvalidOperationException("لا يمكن خلط خطة Lite مع خطة Pro القديمة.");
+        string presetId = lite ? LiteId : Id;
+        var canonical = Build(freshInventory, new(AllowOtherClientEditions: lite)).Operations.Select(Key).ToHashSet(StringComparer.Ordinal);
         foreach (var operation in operations)
         {
             if (operation.PresetId is not null)
             {
-                if (operation.PresetId != Id || !canonical.Contains(Key(operation)))
+                if (operation.PresetId != presetId || !canonical.Contains(Key(operation)))
                     throw new InvalidOperationException("خطة التخفيف تغيّرت أو لم تعد مطابقة للصورة. أعد تحليل التخفيف قبل التطبيق: " + operation.Target);
             }
             if (operation.Kind == OperationKind.RemoveProvisionedApp)

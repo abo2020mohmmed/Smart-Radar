@@ -136,7 +136,7 @@ public sealed class ImageEngine : IDisposable
                     case OperationKind.SetRegistry:
                         await registry.SetValueAsync(project, operation.Registry!, token).ConfigureAwait(false); break;
                     case OperationKind.SetServiceStart:
-                        await registry.SetServiceAsync(project, operation.Target, int.Parse(operation.Arguments, CultureInfo.InvariantCulture), token, operation.PresetId == AggressivePreset.Id).ConfigureAwait(false); break;
+                        await registry.SetServiceAsync(project, operation.Target, int.Parse(operation.Arguments, CultureInfo.InvariantCulture), token, AggressivePreset.KnownPreset(operation.PresetId)).ConfigureAwait(false); break;
                     case OperationKind.RemoveOneDrive:
                         foreach (string notice in await registry.RemoveOneDriveAsync(project, token).ConfigureAwait(false)) operationNotices.Enqueue(notice);
                         break;
@@ -154,7 +154,7 @@ public sealed class ImageEngine : IDisposable
             }).ConfigureAwait(false);
             completed?.Report(operation);
         }
-        if (operations.Any(o => o.PresetId == AggressivePreset.Id))
+        if (operations.Any(o => AggressivePreset.KnownPreset(o.PresetId)))
         {
             var after = await ReadInventoryCoreAsync(project, token).ConfigureAwait(false);
             string summary = AggressivePreset.AfterApplySummary(after);

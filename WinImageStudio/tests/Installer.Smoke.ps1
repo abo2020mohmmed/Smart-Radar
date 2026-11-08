@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$installer = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../artifacts/setup/WinImageStudio-Setup-0.6.0-x64.exe'))
+$installer = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../artifacts/setup/WinImageStudio-Setup-0.6.1-x64.exe'))
 $root = Join-Path ([IO.Path]::GetTempPath()) ('WIS Installer Test ' + [Guid]::NewGuid().ToString('N'))
 $installDir = Join-Path $root 'Program Files/WinImageStudio'
 $saved = Join-Path $root 'Saved Projects'

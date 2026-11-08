@@ -32,7 +32,7 @@ jobs:
       - name: Parse Windows PowerShell scripts
         shell: powershell
         run: |
-          foreach ($file in @('build.ps1','src/WinImageStudio.Desktop/Scripts/ImageTools.ps1','src/WinImageStudio.Desktop/Scripts/MediaCopy.ps1','tests/MediaCopy.Tests.ps1','tests/PresetMetadata.Tests.ps1','src/WinImageStudio.Desktop/Scripts/PresetMetadata.ps1','src/WinImageStudio.Desktop/Scripts/VerifyAdk.ps1','installer/build-installer.ps1','tests/Installer.Smoke.ps1')) {
+          foreach ($file in @('build.ps1','src/WinImageStudio.Desktop/Scripts/ImageTools.ps1','src/WinImageStudio.Desktop/Scripts/MediaCopy.ps1','tests/MediaCopy.Tests.ps1','tests/PresetMetadata.Tests.ps1','src/WinImageStudio.Desktop/Scripts/PresetMetadata.ps1','src/WinImageStudio.Desktop/Scripts/VerifyAdk.ps1','installer/build-installer.ps1','tests/Installer.Smoke.ps1','tests/Installer.Finish.ps1','tests/Lite.Smoke.ps1','tests/LiteInstaller.Smoke.ps1')) {
             $tokens = $null; $parseErrors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD $file), [ref]$tokens, [ref]$parseErrors) | Out-Null
             if ($parseErrors.Count) { $parseErrors | Format-List; exit 1 }
@@ -62,10 +62,22 @@ jobs:
           Copy-Item third-party -Destination artifacts/win-x64 -Recurse
           Compress-Archive -Path artifacts/win-x64/* -DestinationPath artifacts/WinImageStudio-windows-x64.zip
           Get-FileHash artifacts/WinImageStudio-windows-x64.zip -Algorithm SHA256 | Format-List
+      - name: Build minimal Lite application
+        run: |
+          dotnet publish src/WinImageStudio.Lite/WinImageStudio.Lite.csproj -c Release -r win-x64 --self-contained true -o artifacts/lite-win-x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item LICENSE -Destination artifacts/lite-win-x64
+          Copy-Item installer/LITE.ar.txt -Destination artifacts/lite-win-x64
+          Copy-Item third-party -Destination artifacts/lite-win-x64 -Recurse
       - name: Verify desktop startup and path navigation
         shell: powershell
         run: |
           & ./tests/Desktop.Smoke.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify Lite automatic output on a saved native fixture
+        shell: powershell
+        run: |
+          & ./tests/Lite.Smoke.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build single-file Windows installer
         shell: powershell
@@ -77,6 +89,19 @@ jobs:
         run: |
           & ./tests/Installer.Smoke.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify Lite installation and project preservation
+        shell: powershell
+        run: |
+          & ./tests/LiteInstaller.Smoke.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify interactive Finish launches full app with elevation
+        shell: powershell
+        run: |
+          & ./tests/Installer.Finish.ps1 -SetupPath artifacts/setup/WinImageStudio-Setup-0.6.1-x64.exe -AppName WinImageStudio
+      - name: Verify interactive Finish launches Lite with elevation
+        shell: powershell
+        run: |
+          & ./tests/Installer.Finish.ps1 -SetupPath artifacts/setup/WinImageStudio-Lite-Setup-0.7.0-x64.exe -AppName WinImageStudio.Lite
       - name: Downloadable EXE installer
         uses: actions/upload-artifact@v4
         with:
@@ -109,10 +134,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          tag="winimagestudio-v0.6.0-${GITHUB_SHA:0:7}"
+          tag="winimagestudio-lite-v0.7.0-${GITHUB_SHA:0:7}"
           cat > release-notes.txt <<'NOTES'
-          WinImageStudio 0.6.0 Windows x64 installer. Includes the exact user-supplied Microsoft ADK bootstrapper, checked by SHA-256 and Microsoft Authenticode before execution. The optional Deployment Tools step may require internet. Installer, installed app, upgrade and uninstall preservation tests passed on Windows. User projects/ISOs and shared Microsoft ADK remain after uninstall. See INSTALL.ar.txt for Arabic instructions.
+          WinImageStudio Lite 0.7.0 automatic strong customization for Windows 10/11 client editions, plus WinImageStudio full 0.6.1 with corrected post-install elevation. Includes the exact user-supplied Microsoft ADK bootstrapper, checked by SHA-256 and Microsoft Authenticode before execution. The optional Deployment Tools step may require internet. Installer, installed app, upgrade and uninstall preservation tests passed on Windows. User projects/ISOs and shared Microsoft ADK remain after uninstall. See INSTALL.ar.txt for Arabic instructions.
           NOTES
           if ! gh release view "$tag" > /dev/null 2>&1; then
-            gh release create "$tag" release-files/* --target "$GITHUB_SHA" --title "WinImageStudio 0.6.0 — Windows installer" --notes-file release-notes.txt
+            gh release create "$tag" release-files/* --target "$GITHUB_SHA" --title "WinImageStudio Lite 0.7.0 + Full 0.6.1" --notes-file release-notes.txt
           fi

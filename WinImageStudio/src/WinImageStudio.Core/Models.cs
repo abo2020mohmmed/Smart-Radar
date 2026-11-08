@@ -65,7 +65,7 @@ public interface IProjectStore
 }
 
 public sealed record ImageProfile(string EditionId, string InstallationType, string Build, string BaseLanguage, IReadOnlyList<string> InstalledLanguages, bool PendingActions, bool DefenderPresent, bool OneDrivePresent);
-public sealed record AggressiveOptions(bool RemoveDefender = true, bool RemoveOtherLanguages = true);
+public sealed record AggressiveOptions(bool RemoveDefender = true, bool RemoveOtherLanguages = true, bool AllowOtherClientEditions = false);
 public sealed record AggressiveReport(string PresetId, AggressiveOptions Options, ImageProfile Profile, IReadOnlyList<PlannedOperation> Operations, IReadOnlyList<string> Notes);
 
 public sealed record IsoBuildSummary(string Compression, long? SourceIsoBytes, long OutputIsoBytes, long WorkingWimBytes, long InstallationImageBytes);

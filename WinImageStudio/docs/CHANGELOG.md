@@ -1,5 +1,13 @@
 # Changes
 
+## Lite 0.7.0 / Full 0.6.1
+
+- Add an independent Lite app and installer: one strong preset, ISO edition selection, and one start action for tools/import/mount/native analysis/apply/commit/fresh ESD/ISO output. Preserve the full application separately.
+- Lite accepts validated Windows 10/11 Client edition metadata including Home, N, Education, Enterprise and LTSC. Storeless/printing-incomplete sources are reported accurately; existing protected components and Arabic/English/base languages remain guarded. The old full Pro preset stays strict under its original ID. Lite has a separate canonical preset ID and rejects mixed/tampered plans.
+- Persist Lite progress, resume saved output without repeating application, stop on failure/cancellation, require explicit discard recovery and refuse existing output filenames. Original ISO is preserved.
+- Correct full and Lite post-install launch with runascurrentuser: inherit the installer elevation instead of attempting CreateProcess under the original unelevated token (error 740). UAC remains enabled.
+- Add client-edition and automatic-orchestration tests, a native Lite saved-fixture UI test through ESD/oscdimg/readable ISO validation, installer preservation tests for Lite, and interactive wizard Finish tests for both apps. Inert fixtures do not certify Windows installation/boot or every edition/build.
+
 ## 0.6.0
 
 - Add an Arabic/English single-EXE installer with desktop/Start menu shortcuts, upgrade support and tracked-file uninstall. Projects, ISO files, reports and shared Microsoft ADK are outside uninstall deletion; unknown user-created files are preserved even inside the application directory.
