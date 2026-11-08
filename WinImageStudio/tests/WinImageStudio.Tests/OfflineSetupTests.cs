@@ -102,6 +102,13 @@ internal static class OfflineSetupTests
             Run("dism.exe", "/English", "/Mount-Image", "/ImageFile:" + wim, "/Index:1", "/MountDir:" + mount); mounted = true;
             Check(!File.Exists(Path.Combine(mount, "Windows", "SysWOW64", "OneDriveSetup.exe")), "deletion did not persist");
             Check(File.Exists(source), "capture source changed");
+            Run("dism.exe", "/English", "/Unmount-Image", "/MountDir:" + mount, "/Discard"); mounted = false;
+            string esd = Path.Combine(root, "fixture.esd");
+            byte[] before = File.ReadAllBytes(wim);
+            Run("dism.exe", DismCommands.ExportFinal(wim, esd, true).ToArray());
+            Run("dism.exe", "/English", "/Get-WimInfo", "/WimFile:" + esd);
+            Check(File.Exists(esd) && File.ReadAllBytes(wim).SequenceEqual(before), "ESD export changed working WIM");
+            Console.WriteLine("PASS Native recovery-compressed ESD export and DISM validation");
         }
         finally
         {

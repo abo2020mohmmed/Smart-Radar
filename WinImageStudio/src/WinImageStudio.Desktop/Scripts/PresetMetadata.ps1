@@ -1,4 +1,4 @@
-function Get-WisPackageMetadata {
+﻿function Get-WisPackageMetadata {
     [CmdletBinding()]
     param([Parameter(Mandatory=$true)][string]$MountPath, [Parameter(Mandatory=$true)][string]$PackageName)
     $parts = $PackageName.Split('~')
@@ -65,6 +65,27 @@ function Read-WisOfflineHive {
     }
 }
 
+function Get-WisWin32Programs {
+    param([Microsoft.Win32.RegistryKey]$Root)
+    $programs = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($path in @('Microsoft\Windows\CurrentVersion\Uninstall','Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall')) {
+        $parent = $Root.OpenSubKey($path)
+        if (!$parent) { continue }
+        try {
+            foreach ($name in $parent.GetSubKeyNames()) {
+                $item = $parent.OpenSubKey($name)
+                if (!$item) { continue }
+                try {
+                    $display = [string]$item.GetValue('DisplayName')
+                    if (!$display) { continue }
+                    $programs.Add([pscustomobject]@{Name=$display; State=[string]$item.GetValue('DisplayVersion'); Details=([string]$item.GetValue('Publisher') + ' | ' + [string]$item.GetValue('InstallLocation') + ' | ' + $path); Removable=$false})
+                } finally { $item.Dispose() }
+            }
+        } finally { $parent.Dispose() }
+    }
+    $programs.ToArray()
+}
+
 function Get-WisOfflineRegistryProfile {
     [CmdletBinding()]
     param([string]$MountPath, [string]$ProjectId)
@@ -108,8 +129,8 @@ function Get-WisOfflineRegistryProfile {
         param($root)
         $key = $root.OpenSubKey('Microsoft\Windows NT\CurrentVersion')
         if (!$key) { throw 'Offline Windows version key is missing.' }
-        try { [pscustomobject]@{ EditionId=[string]$key.GetValue('EditionID'); InstallationType=[string]$key.GetValue('InstallationType'); Build=[string]$key.GetValue('CurrentBuildNumber') } }
+        try { [pscustomobject]@{ EditionId=[string]$key.GetValue('EditionID'); InstallationType=[string]$key.GetValue('InstallationType'); Build=[string]$key.GetValue('CurrentBuildNumber'); Win32Programs=@(Get-WisWin32Programs -Root $root) } }
         finally { $key.Dispose() }
     }
-    [pscustomobject]@{ Services=$system.Services; BaseLanguage=$system.BaseLanguage; InstalledLanguages=$system.InstalledLanguages; EditionId=$software.EditionId; InstallationType=$software.InstallationType; Build=$software.Build }
+    [pscustomobject]@{ Services=$system.Services; BaseLanguage=$system.BaseLanguage; InstalledLanguages=$system.InstalledLanguages; EditionId=$software.EditionId; InstallationType=$software.InstallationType; Build=$software.Build; Win32Programs=@($software.Win32Programs) }
 }

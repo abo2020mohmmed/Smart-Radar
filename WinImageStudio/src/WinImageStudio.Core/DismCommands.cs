@@ -7,6 +7,8 @@ public static class DismCommands
         if (index < 1) throw new ArgumentOutOfRangeException(nameof(index));
         return ["/English", "/Export-Image", "/SourceImageFile:" + source, "/SourceIndex:" + index, "/DestinationImageFile:" + destination, "/Compress:max", "/CheckIntegrity"];
     }
+    public static IReadOnlyList<string> ExportFinal(string source, string destination, bool esd) =>
+        ["/English", "/Export-Image", "/SourceImageFile:" + source, "/SourceIndex:1", "/DestinationImageFile:" + destination, esd ? "/Compress:recovery" : "/Compress:max", "/CheckIntegrity"];
     public static IReadOnlyList<string> Mount(string wim, string mount) => ["/English", "/Mount-Image", "/ImageFile:" + wim, "/Index:1", "/MountDir:" + mount, "/CheckIntegrity"];
     public static IReadOnlyList<string> Unmount(string mount, bool commit) => commit ? ["/English", "/Unmount-Image", "/MountDir:" + mount, "/Commit", "/CheckIntegrity"] : ["/English", "/Unmount-Image", "/MountDir:" + mount, "/Discard"];
     public static IReadOnlyList<string> Change(string mount, PlannedOperation operation)

@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory=$true)][ValidateSet('Images','Inventory','ExtractIso','Mounts')][string]$Action,
     [string]$Source, [string]$Destination, [string]$MountPath,
     [ValidatePattern('^[a-fA-F0-9]{32}$')][string]$ProjectId
@@ -84,7 +84,7 @@ try {
             PendingActions=[IO.File]::Exists((Join-Path $MountPath 'Windows\WinSxS\pending.xml'));
             DefenderPresent=$defenderPresent; OneDrivePresent=$oneDrivePresent
         }
-        [pscustomobject]@{ Features=$features; Packages=$packages; Drivers=$drivers; Apps=$apps; Services=$services; Profile=$profile; Capabilities=$capabilities } | ConvertTo-Json -Depth 8 -Compress
+        [pscustomobject]@{ Features=$features; Packages=$packages; Drivers=$drivers; Apps=$apps; Services=$services; Win32Programs=@($registry.Win32Programs); Profile=$profile; Capabilities=$capabilities } | ConvertTo-Json -Depth 8 -Compress
     }
     exit 0
 } catch { [Console]::Error.WriteLine($_.Exception.ToString()); exit 1 }

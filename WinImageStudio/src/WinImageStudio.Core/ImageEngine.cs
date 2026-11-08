@@ -188,7 +188,7 @@ public sealed class ImageEngine : IDisposable
             project.State = ImageState.Discarded;
         }).ConfigureAwait(false);
     }, token);
-    public Task BuildIsoAsync(ProjectSession project, string output, CancellationToken token) => ExclusiveAsync(async () =>
+    public Task BuildIsoAsync(ProjectSession project, string output, CancellationToken token, bool useEsd = true) => ExclusiveAsync(async () =>
     {
         if (project.State != ImageState.Committed) throw new InvalidOperationException("Commit the image successfully before building the ISO.");
         string media = project.MediaPath ?? throw new InvalidOperationException("ISO output requires a project imported from a complete Windows installation ISO.");
@@ -203,21 +203,72 @@ public sealed class ImageEngine : IDisposable
         await JournalAsync(project, "Build bootable ISO", async () =>
         {
             string sources = Path.Combine(media, "sources");
-            string destination = Path.Combine(sources, "install.wim");
-            Validation.UnderRoot(project.Root, destination);
-            string stagedImage = destination + ".staging-" + Guid.NewGuid().ToString("N");
-            File.Copy(project.WorkingWim, stagedImage, false);
-            File.Move(stagedImage, destination, true);
+            string destination = Validation.UnderRoot(project.Root, Path.Combine(sources, useEsd ? "install.esd" : "install.wim"));
+            // Re-export into a new container. Copying the edited WIM retains old/unreferenced data.
+            string stagedImage = Validation.UnderRoot(project.Root, Path.Combine(project.Root, "final-" + Guid.NewGuid().ToString("N") + (useEsd ? ".esd" : ".wim")));
+            try
+            {
+                await DismAsync(project, DismCommands.ExportFinal(project.WorkingWim, stagedImage, useEsd), token).ConfigureAwait(false);
+                if (!File.Exists(stagedImage) || new FileInfo(stagedImage).Length == 0) throw new IOException("DISM did not produce a nonempty installation image.");
+                File.Move(stagedImage, destination, true);
+            }
+            finally { if (File.Exists(stagedImage)) File.Delete(stagedImage); }
             foreach (string file in Directory.GetFiles(sources))
             {
                 string name = Path.GetFileName(file);
-                if (name.Equals("install.esd", StringComparison.OrdinalIgnoreCase) || name.Equals("install.swm", StringComparison.OrdinalIgnoreCase) || (name.StartsWith("install", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".swm", StringComparison.OrdinalIgnoreCase) && int.TryParse(name[7..^4], out _))) File.Delete(file);
+                bool install = name.Equals("install.wim", StringComparison.OrdinalIgnoreCase) || name.Equals("install.esd", StringComparison.OrdinalIgnoreCase) || name.Equals("install.swm", StringComparison.OrdinalIgnoreCase) ||
+                    (name.StartsWith("install", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".swm", StringComparison.OrdinalIgnoreCase) && int.TryParse(name[7..^4], out _));
+                if (install && !file.Equals(destination, StringComparison.OrdinalIgnoreCase)) { Validation.UnderRoot(project.Root, file); File.Delete(file); }
             }
             var result = await runner.RunAsync(oscdimg, DismCommands.Iso(media, temporary), token).ConfigureAwait(false);
             result.EnsureSuccess("Build ISO");
             File.Move(temporary, output, false);
+            var summary = new IsoBuildSummary(useEsd ? "ESD / recovery" : "WIM / max",
+                Path.GetExtension(project.Source).Equals(".iso", StringComparison.OrdinalIgnoreCase) && File.Exists(project.Source) ? new FileInfo(project.Source).Length : null,
+                new FileInfo(output).Length, new FileInfo(project.WorkingWim).Length, new FileInfo(destination).Length);
+            await File.WriteAllTextAsync(Path.Combine(project.Root, "iso-build-summary.json"), JsonSerializer.Serialize(summary, ProjectStore.JsonOptions), CancellationToken.None).ConfigureAwait(false);
             project.State = ImageState.Committed;
         }).ConfigureAwait(false);
+    }, token);
+    public Task<string> AuditCommittedAsync(ProjectSession project, CancellationToken token) => ExclusiveAsync(async () =>
+    {
+        if (project.State != ImageState.Committed) throw new InvalidOperationException("احفظ الصورة وألغِ تركيبها قبل الفحص.");
+        if (Directory.EnumerateFileSystemEntries(project.MountPath).Any()) throw new IOException("مجلد التركيب غير فارغ؛ لا يمكن بدء الفحص.");
+        string report = Validation.UnderRoot(project.Root, Path.Combine(project.Root, "image-audit.html"));
+        await JournalAsync(project, "Audit saved image without committing changes", async () =>
+        {
+            Inventory inventory;
+            bool mounted = false;
+            Exception? primary = null;
+            try
+            {
+                await DismAsync(project, DismCommands.Mount(project.WorkingWim, project.MountPath), token).ConfigureAwait(false);
+                mounted = true;
+                string json = await PowerShellAsync("Inventory", token, "-MountPath", project.MountPath, "-ProjectId", project.Id).ConfigureAwait(false);
+                inventory = JsonSerializer.Deserialize<Inventory>(json, JsonOptions) ?? throw new InvalidDataException("Invalid image audit inventory.");
+                string installers = Validation.UnderRoot(project.MountPath, Path.Combine(project.MountPath, "WinImageStudio", "Installers"));
+                var staged = Directory.Exists(installers) ? Directory.EnumerateFiles(installers).Where(f => Path.GetExtension(f).ToLowerInvariant() is ".exe" or ".msi")
+                    .Select(f => new InventoryItem(Path.GetFileName(f), "Staged, not verified installed", "SetupComplete installer payload")).ToArray() : [];
+                inventory = inventory with { StagedInstallers = staged };
+            }
+            catch (Exception ex) { primary = ex; throw; }
+            finally
+            {
+                if (mounted)
+                {
+                    try
+                    {
+                        if (primary is not null) await registry.RecoverUnloadAsync(project).ConfigureAwait(false);
+                        await DismAsync(project, DismCommands.Unmount(project.MountPath, false), CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (Exception cleanup) { if (primary is not null) throw new AggregateException(primary, cleanup); throw; }
+                }
+            }
+            await File.WriteAllTextAsync(Validation.UnderRoot(project.Root, Path.Combine(project.Root, "image-audit.json")), JsonSerializer.Serialize(inventory, ProjectStore.JsonOptions), token).ConfigureAwait(false);
+            await File.WriteAllTextAsync(report, ImageAuditReport.Html(project, inventory), token).ConfigureAwait(false);
+            project.State = ImageState.Committed;
+        }).ConfigureAwait(false);
+        return report;
     }, token);
     private async Task DismAsync(ProjectSession project, IReadOnlyList<string> arguments, CancellationToken token)
     {

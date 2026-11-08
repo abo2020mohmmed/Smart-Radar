@@ -254,9 +254,41 @@ public partial class MainWindow : Window
     private Task BuildIsoAsync() => RunAsync("إنشاء ISO قابل للإقلاع", async token =>
     {
         ReplaceEngine();
-        await engine.BuildIsoAsync(Session(), OutputFileBox.Text, token);
-        Session().WorkflowStage = 5; Session().OutputIso = Path.GetFullPath(OutputFileBox.Text); EditorTabs.SelectedItem = DoneTab;
+        await engine.BuildIsoAsync(Session(), OutputFileBox.Text, token, HighCompressionBox.IsChecked == true);
+        Session().WorkflowStage = 5; Session().OutputIso = Path.GetFullPath(OutputFileBox.Text);
+        var summary = JsonSerializer.Deserialize<IsoBuildSummary>(await File.ReadAllTextAsync(Path.Combine(Session().Root, "iso-build-summary.json"), token), ProjectStore.JsonOptions);
+        if (summary is not null) BuildSizeBox.Text = $"الضغط: {summary.Compression} | ISO الجديد: {summary.OutputIsoBytes / 1073741824.0:F2} GiB" + (summary.SourceIsoBytes is long sourceBytes ? $" | الأصلي: {sourceBytes / 1073741824.0:F2} GiB" : "") + "\nالحجم لا يثبت اكتمال إزالة البرامج؛ استخدم تقرير الفحص.";
+        EditorTabs.SelectedItem = DoneTab;
     });
+    private async void InstallAdk(object sender, RoutedEventArgs e) => await RunAsync("تنزيل ADK الرسمي والتحقق من توقيعه وتثبيت Deployment Tools…", async token =>
+    {
+        var installer = new AdkInstaller(new ProcessRunner(Log), ToolSettings.WindowsDefaults().PowerShell, Path.Combine(AppContext.BaseDirectory, "Scripts", "VerifyAdk.ps1"));
+        var result = await installer.EnsureInstalledAsync(token);
+        OscdimgBox.Text = result.Path;
+        AdkStatus.Text = result.RebootRequired ? "✓ اكتمل إعداد الأداة. طلب المثبت إعادة تشغيل الجهاز؛ احفظ المشروع وأعد التشغيل قبل البناء إذا لزم." : "✓ أداة ISO جاهزة ومحددة تلقائيًا. يمكنك الآن الضغط على التالي.";
+    });
+    private async void AuditImage(object sender, RoutedEventArgs e) => await RunAsync("فحص الصورة المحفوظة وجرد البرامج دون حفظ أي تغيير…", async token =>
+    {
+        string report = await engine.AuditCommittedAsync(Session(), token);
+        AuditStatus.Text = "✓ اكتمل جرد صورة المشروع. اضغط فتح تقرير البرامج. هذا فحص غير متصل، وليس اختبار إقلاع أو فحصًا أمنيًا.";
+        Log("تقرير البرامج: " + report);
+    });
+    private async void ViewAudit(object sender, RoutedEventArgs e) => await RunAsync("فتح تقرير البرامج", token =>
+    {
+        string report = Validation.UnderRoot(Session().Root, Path.Combine(Session().Root, "image-audit.html"));
+        Validation.ExistingFile(report, ".html");
+        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(report) { UseShellExecute = true });
+        return Task.CompletedTask;
+    });
+    private void RebuildIso(object sender, RoutedEventArgs e)
+    {
+        if (busy || project?.State != ImageState.Committed || project.MediaPath is null) return;
+        string folder = Path.GetDirectoryName(project.OutputIso ?? Path.Combine(project.Root, "Windows-Custom.iso"))!;
+        string name = Path.Combine(folder, "Windows-Custom-ESD-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".iso");
+        if (File.Exists(name)) name = Path.Combine(folder, "Windows-Custom-ESD-" + Guid.NewGuid().ToString("N") + ".iso");
+        OutputFileBox.Text = name; HighCompressionBox.IsChecked = true; project.WorkflowStage = 4;
+        EditorTabs.SelectedItem = OutputTab; RefreshJourney();
+    }
     private void ReplaceEngine() { var replacement = NewEngine(); engine.Dispose(); engine = replacement; }
     private void SetDefaultOutput()
     {
@@ -430,6 +462,10 @@ public partial class MainWindow : Window
         ComponentsTab.Visibility = IntegrationTab.Visibility = RegistryTab.Visibility = strong ? Visibility.Collapsed : Visibility.Visible;
         StrongTab.Visibility = strong ? Visibility.Visible : Visibility.Collapsed;
         StrongMode.IsEnabled = ManualMode.IsEnabled = !busy && plan.Count == 0 && (project?.WorkflowStage ?? 0) < 3;
+        AuditButton.IsEnabled = !busy && project?.State == ImageState.Committed;
+        ViewAuditButton.IsEnabled = !busy && project is not null && File.Exists(Path.Combine(project.Root, "image-audit.html"));
+        RebuildButton.IsEnabled = !busy && project?.State == ImageState.Committed && project.MediaPath is not null;
+        AdkButton.IsEnabled = !busy;
         OpenProjectButton.IsEnabled = !busy && project?.State is not (ImageState.Mounted or ImageState.RecoveryRequired);
         bool recovery = project?.State == ImageState.RecoveryRequired;
         if (recovery && EditorTabs.SelectedItem != PrepareTab) { EditorTabs.SelectedItem = PrepareTab; return; }

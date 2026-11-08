@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot '../src/WinImageStudio.Desktop/Scripts/PresetMetadata.ps1')
 $root = Join-Path ([IO.Path]::GetTempPath()) ('WisMetadata-' + [Guid]::NewGuid().ToString('N'))
@@ -91,6 +91,10 @@ try {
                     try {
                         $key = $software.CreateSubKey('Microsoft\Windows NT\CurrentVersion')
                         try { $key.SetValue('EditionID','Professional'); $key.SetValue('InstallationType','Client'); $key.SetValue('CurrentBuildNumber','19045') } finally { $key.Dispose() }
+                        foreach ($prefix in @('Microsoft\Windows\CurrentVersion\Uninstall','Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall')) {
+                            $program = $software.CreateSubKey($prefix + '\FixtureApp')
+                            try { $program.SetValue('DisplayName','Fixture program'); $program.SetValue('DisplayVersion','1.2'); $program.SetValue('Publisher','Fixture publisher') } finally { $program.Dispose() }
+                        }
                         $software.Flush()
                     } finally { $software.Dispose() }
                     foreach ($hive in @('System','Software')) {
@@ -100,6 +104,8 @@ try {
                     $profile = Get-WisOfflineRegistryProfile -MountPath $root -ProjectId $id
                     Assert ($profile.EditionId -eq 'Professional'); Assert ($profile.InstallationType -eq 'Client'); Assert ($profile.Build -eq '19045')
                     Assert ($profile.BaseLanguage -eq 'en-US'); Assert (@($profile.InstalledLanguages).Contains('ar-SA'))
+                    Assert (@($profile.Win32Programs).Count -eq 2)
+                    Assert (@($profile.Win32Programs | Where-Object Name -eq 'Fixture program').Count -eq 2)
                     Assert (@($profile.Services).Count -eq 2)
                     Assert ([bool](@($profile.Services | Where-Object Name -eq 'Spooler')[0].Removable))
                     Assert (!([bool](@($profile.Services | Where-Object Name -eq 'KernelFixture')[0].Removable)))

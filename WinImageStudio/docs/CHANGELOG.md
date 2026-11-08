@@ -1,5 +1,13 @@
 # Changes
 
+## 0.5.0
+
+- Freshly export the final single-index installation payload before ISO creation: recovery-compressed install.esd by default, or a fresh max-compressed install.wim. This reclaims unreferenced WIM data and avoids always replacing a source ESD with a larger working WIM. No fixed reduction percentage is promised. Original ISO/working WIM remain intact; old install payload alternatives are excluded from the media.
+- Record source ISO/output ISO/working WIM/final install payload byte counts in iso-build-summary.json, and display source/output sizes. Offer rebuilding an existing committed project to a new output filename without repeating customization.
+- Add saved-image inventory auditing: mount the project WIM, query inventory/Win32 uninstall keys, unload/discard the temporary session, and write encoded offline HTML plus JSON. Includes provisioned apps, HKLM Win32 registrations, staged installers, features, packages, drivers, services and languages. Does not certify bootability, malware absence or detect every portable/per-user app.
+- Integrate ADK Deployment Tools setup into the output page. Download the Microsoft bootstrapper over exact allowlisted HTTPS hosts, bound its size, verify valid Microsoft Corporation Authenticode before execution, install only Deployment Tools, and discover oscdimg automatically. Uses Microsoft ADK terms and needs internet; no ADK binaries are added to the customized Windows image.
+- Test fresh export orchestration/media cleanup, native DISM recovery ESD, offline x86/x64 Win32 registry fixtures, HTML encoding, audit discard, download host boundaries and real Microsoft download/signature/ADK setup readiness.
+
 ## 0.4.0
 
 - Replace the duplicated navigation/tab interface with one page per phase and a fixed primary action footer. Next now creates/imports, prepares/analyzes, queues a review, applies with explicit consent, commits, and builds ISO according to the current phase. In particular, Next after application executes commit rather than navigating to the same review tab.

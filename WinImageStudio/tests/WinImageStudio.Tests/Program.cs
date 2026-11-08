@@ -5,6 +5,29 @@ using System.Text.Json;
 using System.Xml.Linq;
 using WinImageStudio.Core;
 
+if (args.Contains("--adk-install", StringComparer.Ordinal))
+{
+    if (!OperatingSystem.IsWindows()) return 1;
+    string ps = ToolSettings.WindowsDefaults().PowerShell;
+    string verify = Path.GetFullPath("src/WinImageStudio.Desktop/Scripts/VerifyAdk.ps1");
+    try
+    {
+        string unsigned = Path.Combine(Path.GetTempPath(), "WIS-unsigned-" + Guid.NewGuid().ToString("N") + ".exe");
+        try
+        {
+            await File.WriteAllTextAsync(unsigned, "inert unsigned fixture");
+            var refused = await new ProcessRunner().RunAsync(ps, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", verify, "-Installer", unsigned], default);
+            if (refused.ExitCode == 0) throw new Exception("Unsigned installer was accepted");
+            Console.WriteLine("PASS ADK signature check refuses unsigned executables");
+        }
+        finally { File.Delete(unsigned); }
+        var installer = new AdkInstaller(new ProcessRunner(Console.WriteLine), ps, verify);
+        var installed = await installer.EnsureInstalledAsync(CancellationToken.None, verifyDownloadEvenIfInstalled: true);
+        Console.WriteLine("PASS Microsoft ADK download/signature, Deployment Tools readiness and oscdimg discovery: " + installed.Path);
+        return 0;
+    }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
 int passed = 0, failed = 0;
 string root = Path.Combine(Path.GetTempPath(), "WinImageStudioTests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
@@ -21,6 +44,27 @@ try
     foreach (var test in WizardFlowTests.Cases()) await Test(test.Name, () => Sync(test.Body));
     foreach (var test in WorkflowTests.Cases()) await Test(test.Name, () => Sync(test.Body));
     foreach (var test in OfflineSetupTests.Cases()) await Test(test.Name, () => Sync(test.Body));
+    await Test("Final export uses recovery for ESD and max for WIM with integrity checking", () => Sync(() =>
+    {
+        Equal(true, DismCommands.ExportFinal("source", "final.esd", true).Contains("/Compress:recovery"));
+        Equal(true, DismCommands.ExportFinal("source", "final.wim", false).Contains("/Compress:max"));
+        Equal(true, DismCommands.ExportFinal("source", "final.esd", true).Contains("/CheckIntegrity"));
+    }));
+    await Test("ADK permits only exact Microsoft HTTPS download hosts", () => Sync(() =>
+    {
+        Equal(true, AdkInstaller.TrustedDownload(new("https://download.microsoft.com/file.exe")));
+        foreach (string url in new[] { "http://download.microsoft.com/a", "https://download.microsoft.com.evil.example/a", "https://user@download.microsoft.com/a", "https://example.com/a", "https://download.microsoft.com:444/a" })
+            Equal(false, AdkInstaller.TrustedDownload(new(url)));
+    }));
+    await Test("Inventory HTML encodes hostile data and distinguishes unknown Win32 inventory", () => Sync(() =>
+    {
+        var session = new ProjectSession { Root = root, Source = "source", WorkingWim = "<script>source</script>", MountPath = "mount" };
+        var inventory = new Inventory([], [], [], [new("<script>alert(1)</script>", "Provisioned", "<img src=x onerror=alert(1)>")], []);
+        string html = ImageAuditReport.Html(session, inventory);
+        Equal(false, html.Contains("<script>", StringComparison.Ordinal)); Equal(false, html.Contains("<img ", StringComparison.Ordinal));
+        Equal(true, html.Contains("&lt;script&gt;", StringComparison.Ordinal));
+        Equal(true, html.Contains("لم تُجمع", StringComparison.Ordinal));
+    }));
     await Test("DISM export keeps paths with spaces in single arguments", () => Sync(() =>
     {
         var args = DismCommands.Export("C:\\Windows media\\install.esd", 3, "D:\\Work images\\install.wim");
@@ -116,6 +160,50 @@ try
     }
     string mockScript = Path.Combine(root, "mock.ps1"); await File.WriteAllTextAsync(mockScript, "# Mocked runner: never executed");
     ImageEngine Engine(FakeRunner runner) => new(runner, new ProjectStore(), new ToolSettings("powershell", "dism", "reg"), mockScript);
+    foreach (bool esd in new[] { true, false })
+    {
+        await Test("ISO freshly exports one install payload and preserves boot files: " + esd, async () =>
+        {
+            var project = await NewEngineProject("iso-export-" + esd); project.State = ImageState.Committed;
+            project.MediaPath = Path.Combine(project.Root, "media");
+            string sources = Path.Combine(project.MediaPath, "sources"); Directory.CreateDirectory(sources);
+            Directory.CreateDirectory(Path.Combine(project.MediaPath, "boot"));
+            await File.WriteAllTextAsync(Path.Combine(project.MediaPath, "boot", "etfsboot.com"), "boot");
+            foreach (string name in new[] { "install.wim", "install.esd", "install.swm", "install2.swm", "boot.wim" }) await File.WriteAllTextAsync(Path.Combine(sources, name), "old");
+            string tool = Path.Combine(project.Root, "oscdimg.exe"); await File.WriteAllTextAsync(tool, "mock tool");
+            var runner = new FakeRunner(async command =>
+            {
+                if (command.Contains("/Export-Image"))
+                {
+                    Equal(true, command.Contains(esd ? "/Compress:recovery" : "/Compress:max"));
+                    string stage = command.First(a => a.StartsWith("/DestinationImageFile:", StringComparison.Ordinal))["/DestinationImageFile:".Length..];
+                    Equal(false, stage.StartsWith(project.MediaPath + Path.DirectorySeparatorChar, StringComparison.Ordinal));
+                    await File.WriteAllTextAsync(stage, "fresh exported payload");
+                }
+                else await File.WriteAllTextAsync(command[^1], "mock ISO output");
+                return new ProcessResult(0, "", "");
+            });
+            using var engine = new ImageEngine(runner, new ProjectStore(), new("powershell", "dism", "reg", tool), mockScript);
+            string output = Path.Combine(project.Root, "output.iso");
+            await engine.BuildIsoAsync(project, output, default, esd);
+            Equal("fresh exported payload", await File.ReadAllTextAsync(Path.Combine(sources, esd ? "install.esd" : "install.wim")));
+            Equal(2, Directory.GetFiles(sources).Length); Equal(true, File.Exists(Path.Combine(sources, "boot.wim")));
+            Equal("inert mocked WIM", await File.ReadAllTextAsync(project.WorkingWim));
+            Equal(ImageState.Committed, project.State); Equal(true, File.Exists(output));
+            Equal(0, Directory.GetFiles(project.Root, "final-*").Length);
+        });
+    }
+    await Test("Saved-image audit discards its mount and preserves image bytes", async () =>
+    {
+        var project = await NewEngineProject("audit-saved"); project.State = ImageState.Committed;
+        string inventory = JsonSerializer.Serialize(new Inventory([], [], [], [new("Fixture.App", "Provisioned", "fixture")], [], Win32Programs: []));
+        var runner = new FakeRunner(command => Task.FromResult(new ProcessResult(0, command.Contains("Inventory") ? inventory : "", "")));
+        using var engine = Engine(runner);
+        string report = await engine.AuditCommittedAsync(project, default);
+        Equal(true, runner.Calls.Any(c => c.Contains("/Discard"))); Equal(false, runner.Calls.Any(c => c.Contains("/Commit")));
+        Equal("inert mocked WIM", await File.ReadAllTextAsync(project.WorkingWim));
+        Equal(ImageState.Committed, project.State); Equal(true, (await File.ReadAllTextAsync(report)).Contains("Fixture.App", StringComparison.Ordinal));
+    });
     await Test("Mount journals recovery state before starting the tool", async () =>
     {
         var project = await NewEngineProject("engine-mount-ok");
