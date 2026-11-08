@@ -297,7 +297,7 @@ public partial class MainWindow : Window
     private void ResetStrong()
     {
         strongReport = null; strongProjectId = null; StrongPreview.ItemsSource = null;
-        ReviewResultBox.Text = "";
+        ReviewResultBox.Text = ""; BuildSizeBox.Clear(); AuditStatus.Text = "";
         StrongStatus.Text = "ركّب صورة Pro ثم حلّلها. المتجر والطباعة محفوظان في التخفيف التلقائي.";
         FeaturesGrid.ItemsSource = null; PackagesGrid.ItemsSource = null; DriversGrid.ItemsSource = null; AppsGrid.ItemsSource = null; ServicesGrid.ItemsSource = null;
     }
