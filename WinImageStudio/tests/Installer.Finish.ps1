@@ -2,6 +2,22 @@ param([Parameter(Mandatory=$true)][string]$SetupPath,[Parameter(Mandatory=$true)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class InstallerTestButton {
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+}
+'@
+function Click-InstallerControl($control) {
+    $handle = $control.Current.NativeWindowHandle
+    if (!$handle) { throw ('Installer control has no native window: '+$control.Current.Name) }
+    if (![InstallerTestButton]::PostMessage([IntPtr]$handle,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)) {
+        throw ('Cannot click installer control: '+[Runtime.InteropServices.Marshal]::GetLastWin32Error())
+    }
+}
 $root = Join-Path ([IO.Path]::GetTempPath()) ('WIS Finish Test ' + [Guid]::NewGuid().ToString('N'))
 $target = Join-Path $root 'Application'
 [IO.Directory]::CreateDirectory($root) | Out-Null
@@ -19,16 +35,15 @@ try {
             $controls = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
             foreach ($control in $controls) {
                 $name = ([string]$control.Current.Name).Replace('&','').Trim()
-                if ($name -eq 'I accept the agreement' -and $control.Current.IsEnabled) {
-                    try { $control.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() }
-                    catch { $control.GetCurrentPattern([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern).DoDefaultAction() }
+                if ($name -eq 'I accept the agreement' -and $control.Current.IsEnabled -and $control.Current.ControlType -eq [System.Windows.Automation.ControlType]::RadioButton) {
+                    Click-InstallerControl $control
                 }
             }
             foreach ($control in $controls) {
                 $name = ([string]$control.Current.Name).Replace('&','').Trim()
-                if ($name -match '^(Next\s*>?|Install|Finish)$' -and $control.Current.IsEnabled -and !$control.Current.IsOffscreen) {
+                if ($name -match '^(Next\s*>?|Install|Finish)$' -and $control.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $control.Current.IsEnabled -and !$control.Current.IsOffscreen) {
                     if ($name -eq 'Finish') { $finished = $true }
-                    $control.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); break
+                    Write-Host ('Installer action: '+$name); Click-InstallerControl $control; break
                 }
             }
         }
@@ -44,7 +59,7 @@ try {
     Write-Output ('PASS Interactive Finish opens '+$AppName+' through the elevated installer context (no CreateProcess 740).')
 } catch {
     Write-Host ($_ | Format-List * -Force | Out-String)
-    if (Test-Path -LiteralPath (Join-Path $root 'setup.log')) { Write-Host ([IO.File]::ReadAllText((Join-Path $root 'setup.log'))) }
+    if (Test-Path -LiteralPath (Join-Path $root 'setup.log')) { try { Write-Host (Get-Content -LiteralPath (Join-Path $root 'setup.log') -Raw) } catch { Write-Warning 'Installer still owns its diagnostic log.' } }
     throw
 } finally {
     if ($app) { $null=$app.CloseMainWindow(); if (!$app.WaitForExit(10000)) { $app.Kill(); $app.WaitForExit() }; $app.Dispose() }
