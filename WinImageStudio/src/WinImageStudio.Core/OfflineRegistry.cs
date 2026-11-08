@@ -108,7 +108,7 @@ public sealed class OfflineRegistry(ICommandRunner runner, string regTool)
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                notes.Add("OneDrive: بقي ملف إعداد محمي أو رابط؛ تم تجاوزه: Windows/" + subdirectory + "/OneDriveSetup.exe | " + ex.Message);
+                notes.Add("OneDrive: تعذرت إزالة ملف الإعداد وبقي كما هو؛ راجع السبب: Windows/" + subdirectory + "/OneDriveSetup.exe | " + ex.Message);
             }
         }
         foreach (string folder in new[] { "Program Files", "Program Files (x86)" })

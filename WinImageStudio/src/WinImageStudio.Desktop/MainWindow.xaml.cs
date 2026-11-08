@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? cancellation;
     private bool busy;
     private bool initialized;
+    private int previousPlanCount;
     private AggressiveReport? strongReport;
     private string? strongProjectId;
     private readonly object logLock = new();
@@ -38,7 +39,11 @@ public partial class MainWindow : Window
         PlanGrid.ItemsSource = plan;
         engine = NewEngine();
         initialized = true;
-        plan.CollectionChanged += (_, _) => { if (project is not null) { project.WorkflowStage = Math.Min(project.WorkflowStage, 2); project.OutputIso = null; } RefreshJourney(); };
+        plan.CollectionChanged += (_, _) =>
+        {
+            WorkflowRules.PendingPlanChanged(project, previousPlanCount, plan.Count);
+            previousPlanCount = plan.Count; RefreshJourney();
+        };
         RefreshJourney();
     }
     protected override void OnSourceInitialized(EventArgs e)
@@ -129,6 +134,18 @@ public partial class MainWindow : Window
             ImagesBox.ItemsSource = project.Image is null ? await engine.InspectAsync(project, token) : new[] { project.Image };
             SelectPro();
             if (project.WorkflowStage == 0) project.WorkflowStage = project.State == ImageState.Committed ? 4 : project.State == ImageState.Mounted ? 2 : 1;
+            if (project.WorkflowStage >= 3)
+            {
+                string reportFile = Validation.UnderRoot(project.Root, Path.Combine(project.Root, "aggressive-after.txt"));
+                ReviewResultBox.Text = "✓ الخطة مطبقة/مراجعة في هذه الجلسة. " + (project.State == ImageState.Mounted ? "يمكنك حفظ الصورة مباشرة." : "الصورة محفوظة.");
+                try
+                {
+                    if (File.Exists(reportFile) && new FileInfo(reportFile).Length <= 1024 * 1024)
+                        ReviewResultBox.Text += Environment.NewLine + await File.ReadAllTextAsync(reportFile, token);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log("تعذر قراءة التقرير السابق: " + ex.Message); }
+                EditorTabs.SelectedItem = project.State == ImageState.Mounted ? ReviewTab : OutputTab;
+            }
         });
     }
     private async void ImportImage(object sender, RoutedEventArgs e) => await RunAsync("نسخ الإصدار المختار", async token =>
@@ -199,16 +216,18 @@ public partial class MainWindow : Window
         var completed = new SynchronousProgress(operation => Dispatcher.Invoke(() => plan.Remove(operation)));
         await engine.ApplyAsync(Session(), snapshot, token, completed); plan.Clear(); AcknowledgeBox.IsChecked = false;
         Session().WorkflowStage = 3; ResetStrong();
+        ReviewResultBox.Text = "✓ اكتمل تطبيق الخطة. الخطوة التالية: ④ ب · حفظ الصورة وإلغاء التركيب.";
         if (engine.OperationNotices.Count > 0)
         {
             StrongStatus.Text = "نتيجة التطبيق — راجع العناصر التي بقيت:" + Environment.NewLine + string.Join(Environment.NewLine, engine.OperationNotices);
             foreach (string notice in engine.OperationNotices) Log(notice);
-            MessageBox.Show(this, StrongStatus.Text, "تقرير التخفيف", MessageBoxButton.OK, MessageBoxImage.Information);
+            ReviewResultBox.Text += Environment.NewLine + StrongStatus.Text;
+            MessageBox.Show(this, ReviewResultBox.Text, "تقرير التخفيف — الخطوة التالية حفظ الصورة", MessageBoxButton.OK, MessageBoxImage.Information);
         }
     });
     private async void CommitImage(object sender, RoutedEventArgs e) => await RunAsync("حفظ الصورة وإلغاء التركيب", async token =>
     {
-        if (plan.Count != 0 || Session().WorkflowStage < 3) throw new InvalidOperationException("طبّق الخطة أولًا، أو اختر المتابعة دون تعديلات بعد مراجعتها.");
+        if (!WorkflowRules.CanCommit(Session(), plan.Count)) throw new InvalidOperationException("طبّق الخطة أولًا، أو اختر المتابعة دون تعديلات بعد مراجعتها.");
         await engine.UnmountAsync(Session(), true, token); Session().WorkflowStage = 4; EditorTabs.SelectedItem = OutputTab;
     });
     private async void DiscardImage(object sender, RoutedEventArgs e)
@@ -229,6 +248,7 @@ public partial class MainWindow : Window
     private void ResetStrong()
     {
         strongReport = null; strongProjectId = null; StrongPreview.ItemsSource = null;
+        ReviewResultBox.Text = "";
         StrongStatus.Text = "ركّب صورة Pro ثم حلّلها. المتجر والطباعة محفوظان في التخفيف التلقائي.";
         FeaturesGrid.ItemsSource = null; PackagesGrid.ItemsSource = null; DriversGrid.ItemsSource = null; AppsGrid.ItemsSource = null; ServicesGrid.ItemsSource = null;
     }
@@ -262,10 +282,12 @@ public partial class MainWindow : Window
     }
     private async void ApproveNoChanges(object sender, RoutedEventArgs e) => await RunAsync("مراجعة صورة دون تعديلات", _ =>
     {
-        if (Session().State != ImageState.Mounted || plan.Count != 0) throw new InvalidOperationException("هذا الخيار لصورة مركبة وخطة فارغة فقط.");
-        if (StrongMode.IsChecked == true && (strongReport is null || strongProjectId != Session().Id || strongReport.Operations.Count != 0))
-            throw new InvalidOperationException("حلّل التخفيف أولًا؛ إذا وُجدت تعديلات مقترحة، أضفها وطبّقها.");
-        Session().WorkflowStage = 3; return Task.CompletedTask;
+        if (!WorkflowRules.CanApproveNoChanges(Session(), plan.Count, StrongMode.IsChecked == true, strongReport, strongProjectId,
+            new AggressiveOptions(StrongDefenderBox.IsChecked == true, StrongLanguagesBox.IsChecked == true)))
+            throw new InvalidOperationException("هذا الخيار لخطة فارغة وصورة مركبة. في المسار القوي، حلّل الصورة أولًا؛ إذا وجدت تعديلات مقترحة فأضفها وطبّقها.");
+        Session().WorkflowStage = 3;
+        ReviewResultBox.Text = "✓ تمت المراجعة. اضغط ④ ب · حفظ الصورة وإلغاء التركيب. لا يلزم تكرار التحليل بعد نجاح تطبيق الخطة.";
+        return Task.CompletedTask;
     });
     private void SelectPro()
     {
@@ -283,6 +305,7 @@ public partial class MainWindow : Window
         var image = ImagesBox.SelectedItem as ImageInfo ?? throw new InvalidOperationException("اختر إصدار Windows.");
         if (StrongMode.IsChecked == true && !image.EditionId.Equals("Professional", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("مسار التخفيف القوي مخصص لإصدار Windows Pro القياسي فقط.");
+        if (WorkflowRules.CanCommit(session, plan.Count)) { EditorTabs.SelectedItem = ReviewTab; return; }
         if (!File.Exists(session.WorkingWim)) await engine.ImportAsync(session, image, token);
         if (session.State != ImageState.Mounted) await engine.MountAsync(session, token);
         session.WorkflowStage = 2; session.OutputIso = null;
@@ -345,7 +368,10 @@ public partial class MainWindow : Window
         ApplyPlanButton.Content = (stage >= 3 && !recovery ? "✓ " : "") + "④ أ · تطبيق الخطة";
         CommitButton.Content = (stage >= 4 && !recovery ? "✓ " : "") + "④ ب · حفظ الصورة وإلغاء التركيب";
         ApplyPlanButton.IsEnabled = !busy && project?.State == ImageState.Mounted && plan.Count > 0;
-        CommitButton.IsEnabled = !busy && project?.State == ImageState.Mounted && stage >= 3 && plan.Count == 0;
+        CommitButton.IsEnabled = !busy && WorkflowRules.CanCommit(project, plan.Count);
+        ApproveNoChangesButton.IsEnabled = !busy && project?.State == ImageState.Mounted && plan.Count == 0 && stage < 3;
+        ApproveNoChangesButton.Content = stage >= 3 && !recovery ? "✓ المراجعة مكتملة — احفظ الصورة" : "متابعة دون تعديلات · للخطة الفارغة";
+        NextButton.Content = stage == 3 && !recovery ? "التالي: حفظ الصورة ←" : "التالي ←";
         ImagesBox.IsEnabled = !busy && project?.Image is null;
         BuildIsoButton.IsEnabled = !busy && project?.State == ImageState.Committed && plan.Count == 0;
         OutputPathBox.Text = project?.OutputIso ?? "لم يُنشأ ملف ISO بعد.";

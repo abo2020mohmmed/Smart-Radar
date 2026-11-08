@@ -23,7 +23,7 @@ public static class OfflineSetupFile
         {
             int error = Marshal.GetLastWin32Error();
             if (error is 2 or 3) return;
-            throw new IOException("Cannot open offline installer: " + file, new Win32Exception(error));
+            throw NativeFailure("تعذر فتح ملف الإعداد داخل الصورة", file, error);
         }
         var resolved = new StringBuilder(32768);
         uint length = GetFinalPathNameByHandleW(handle, resolved, (uint)resolved.Capacity, 0);
@@ -39,7 +39,19 @@ public static class OfflineSetupFile
         uint disposition = 1 | 16; // DELETE | IGNORE_READONLY_ATTRIBUTE
         if (!SetFileInformationByHandle(handle, 21, ref disposition, 4)) ThrowNative(file);
     }
-    private static void ThrowNative(string file) => throw new IOException("تعذر حذف ملف الإعداد داخل الصورة: " + file, new Win32Exception(Marshal.GetLastWin32Error()));
+    private static void ThrowNative(string file) => throw NativeFailure("تعذر حذف ملف الإعداد داخل الصورة", file, Marshal.GetLastWin32Error());
+    private static IOException NativeFailure(string operation, string file, int error)
+    {
+        var cause = new Win32Exception(error);
+        string detail = error switch
+        {
+            5 => "رفض Windows صلاحية الوصول؛ لم تُغيّر ملكية الملف أو أذوناته.",
+            32 or 33 => "الملف قيد الاستخدام أو مقفل بواسطة عملية أخرى.",
+            50 or 87 => "عملية الحذف المطلوبة غير مدعومة لهذا الملف أو نظام الملفات.",
+            _ => "راجع رمز Windows لمعرفة سبب التعذر."
+        };
+        return new IOException($"{operation}: {file} | Win32 {error} (0x{error:X8}): {cause.Message} | {detail}", cause);
+    }
     [StructLayout(LayoutKind.Sequential)] private struct AttributeTag { public uint Attributes; public uint Tag; }
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]

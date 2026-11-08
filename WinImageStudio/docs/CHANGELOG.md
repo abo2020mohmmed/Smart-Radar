@@ -1,5 +1,13 @@
 # Changes
 
+## 0.3.1
+
+- Fix the strong-path empty-plan button rejecting a session whose plan already applied successfully and whose old analysis was correctly invalidated. The review gate is now idempotent after confirmed application, never inferred from an empty queue alone.
+- Disable the no-change button after review/application, emphasize saving, and keep an on-screen result in the review step. Reopening an applied project restores its saved report.
+- Clearing an already-empty queue and revisiting preparation no longer erase completed application progress. New pending operations still invalidate completion.
+- Show native Windows error codes and messages for OneDrive file access/deletion failures; distinguish access denial, sharing locks and unsupported operations. A refusal does not prove a symbolic link, and protected files remain explicitly reported. No ownership/ACL bypass was added.
+- Add workflow regression coverage for post-apply review, empty queues, stale reports, recovery state, pending changes and completion invalidation; add a real Windows locked-file diagnostic test.
+
 ## 0.3.0
 
 - Added five numbered steps and separate strong/manual paths, contextual next-step guidance and completion indicators persisted per project.

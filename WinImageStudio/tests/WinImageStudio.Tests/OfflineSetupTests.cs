@@ -1,5 +1,6 @@
 #pragma warning disable CA1416
 using System.Diagnostics;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using WinImageStudio.Core;
@@ -25,6 +26,20 @@ internal static class OfflineSetupTests
             OfflineSetupFile.DeleteOneDrive(root, "SysWOW64");
             Check(!File.Exists(file) && File.Exists(neighbor), "wrong deletion");
             OfflineSetupFile.DeleteOneDrive(root, "System32");
+        }));
+        yield return ("Locked offline installer is preserved with a diagnostic Windows code", () => Fixture(root =>
+        {
+            string file = Installer(root); File.WriteAllText(file, "locked fixture");
+            using (var locked = File.Open(file, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                try { OfflineSetupFile.DeleteOneDrive(root, "SysWOW64"); throw new Exception("Deleted locked installer"); }
+                catch (IOException ex)
+                {
+                    Check(ex.InnerException is Win32Exception { NativeErrorCode: 32 or 33 }, "missing native sharing error");
+                    Check(ex.Message.Contains("Win32", StringComparison.Ordinal), "native code hidden from user");
+                }
+            }
+            Check(File.ReadAllText(file) == "locked fixture", "locked file was changed");
         }));
         yield return ("Windows refuses leaf symbolic link and preserves its target", () => Fixture(root =>
         {
